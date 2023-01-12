@@ -44,7 +44,7 @@ access_token = authentication_response_json["access_token"]
 # Assets #
 ##########
 
-HALO_API_ASSET_URL = env_variables["HALO_API_ASSET_URL"] + "/14/"
+HALO_API_ASSET_URL = env_variables["HALO_API_ASSET_URL"]    # Add e.g. to get custom fields + "/14/"
 
 headers = {
     "Authorization": f"{access_token_type} {access_token}"}
@@ -52,7 +52,7 @@ headers = {
 
 # Seems that paginate, page_size and page_no have no effect.
 asset_parameters = {
-    # "pageinate": 1,
+    "pageinate": 1,
     "page_size": 4,
     "page_no": 6
 }
