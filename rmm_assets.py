@@ -2,9 +2,12 @@
 import re
 import requests
 import json
-import xml.etree.ElementTree as xml
+import logging
+from time import sleep
+import xml.etree.ElementTree as xml_et
 from tqdm import tqdm
 from dotenv import dotenv_values
+from functools import partial, wraps
 
 
 class Asset:
@@ -16,23 +19,52 @@ class Asset:
         return f"{self.id} | {self.client} | {self.name}"
 
 
-def get_clients():
+def retry_function(function=None, *, times: int = 3, interval_sec: float = 8.0,
+                   exceptions: (Exception, tuple[Exception]) = Exception):
+    """
+    Retries the wrapped function. Meant to be used as a decorator.
+    Optional parameters:
+    times: int - The number of times to repeat the wrapped function (default: 3).
+    exceptions: tuple[Exception] - Tuple of exceptions that trigger a retry attempt (default: Exception).
+    interval_sec: float or a function with no arguments that returns a float
+    How many seconds to wait between retry attempts (default: 8)
+    """
+    if function is None:
+        return partial(retry_function, times=times, interval_sec=interval_sec, exceptions=exceptions)
+
+    @wraps(function)
+    def retry(*args, **kwargs):
+        attempt = 1
+        while attempt <= times:
+            try:
+                successful_result = function(*args, **kwargs)
+            except exceptions as exception:
+                log_string = f"Retrying function {function.__name__} in {round(interval, 2)} seconds, " \
+                             f"because {type(exception).__name__} exception occurred: {exception}\n" \
+                             f"Attempt {attempt} of {times}."
+                logging.exception(log_string)
+                attempt += 1
+                if attempt <= times:
+                    sleep(interval_sec)
+            else:
+                if attempt > 1:
+                    logging.info("Retry successful!")
+                return successful_result
+    return retry
+
+
+@retry_function
+def api_get_clients():
 
     parameters = {
         "apikey": RMM_API_KEY,
         "service": "list_clients"}
-
     response = requests.get(RMM_BASE_URL, params=parameters)
-    response_xml = xml.fromstring(response.text)
-
-    clients = dict()
-    for client in response_xml.findall("./items/client"):
-        clients[client.find("./name").text] = client.find("./clientid").text
-
-    return clients
+    return response
 
 
-def get_assets_at_client(client_id, asset_type):
+@retry_function
+def api_get_assets_at_client(client_id, asset_type):
 
     request_parameters = {
         "apikey": RMM_API_KEY,
@@ -41,27 +73,7 @@ def get_assets_at_client(client_id, asset_type):
         "devicetype": asset_type}
 
     response = requests.get(RMM_BASE_URL, params=request_parameters)
-    response_xml = xml.fromstring(response.text)
-
-    assets = list()
-    for site_xml in response_xml.findall("./items/client/site"):
-        for asset_xml in site_xml.findall(f"./{asset_type.lower()}"):
-            try:
-                asset = Asset()
-                asset.client = response_xml.find("./items/client/name").text
-                asset.site = site_xml.find("name").text
-                asset.id = asset_xml.find("id").text
-                asset.name = asset_xml.find("name").text
-                # Mobile devices don't have description attribute
-                asset.description = str() if asset_type == "mobile_device" else asset_xml.find("description").text
-                asset.type = asset_type
-                assets += [asset]
-            except Exception as exception:
-                log_string = f"{type(exception).__name__} happened while getting client assets. " \
-                             f"Client_id: {client_id}, asset_type: {asset_type}. {exception}"
-                print(log_string)
-                del log_string
-    return assets
+    return response
 
 
 def parse_role(role_id: str) -> str:
@@ -89,15 +101,111 @@ def parse_role(role_id: str) -> str:
     return "unknown"
 
 
-def get_asset_details(asset_id):
-    asset = dict()
+@retry_function
+def api_get_asset_details(device_id):
     request_parameters = {
         "apikey": RMM_API_KEY,
         "service": "list_device_asset_details",
-        "deviceid": asset_id}
+        "deviceid": device_id}
 
     response = requests.get(RMM_BASE_URL, params=request_parameters)
-    response_xml = xml.fromstring(response.text)
+    return response
+
+
+################################
+# Load environmental variables #
+################################
+
+env_file_path = ".env"
+# dotenv_values just reads from file without assigning variables to environment.
+# use load_dotenv for the "real thing"
+env_variables = dotenv_values(env_file_path)
+RMM_BASE_URL = env_variables["RMM_BASE_URL"]
+RMM_API_KEY = env_variables["RMM_API_KEY"]
+RMM_ASSET_TYPES = json.loads(env_variables["RMM_ASSET_TYPES"])
+RMM_ASSETS_AT_CLIENT_FIELDS = json.loads(env_variables["RMM_ASSETS_AT_CLIENT_FIELDS"])
+
+
+###########
+# Execute #
+###########
+
+clients_response = api_get_clients()
+response_xml = xml_et.fromstring(clients_response.text)
+clients = dict()
+for client in response_xml.findall("./items/client"):
+    clients[client.find("./name").text] = client.find("./clientid").text
+
+client_assets = list()
+for client, client_id in clients.items():
+    for asset_type in RMM_ASSET_TYPES:
+        client_asset_response = api_get_assets_at_client(client_id=client_id, asset_type=asset_type)
+        client_xml = xml_et.fromstring(client_asset_response.text)
+        client_assets += [{
+            "client": client,
+            "client_id": client_id,
+            "asset_type": asset_type,
+            "xml": client_xml}]
+
+site_assets = list()
+for client_asset in client_assets:
+    client, client_id, asset_type, client_xml = client_asset.values()
+    for site_xml in client_xml.findall("./items/client/site"):
+        site_assets += [{
+            "client": client,
+            "client_id": client_id,
+            "site": site_xml.find("name").text,
+            "site_id": site_xml.find("id").text,
+            "asset_type": asset_type,
+            "xml": site_xml}]
+
+
+assets = list()
+for site_asset in site_assets:
+    client, client_id, site, site_id, asset_type, site_xml = site_asset.values()
+    for device_xml in site_xml.findall(asset_type):
+        asset = Asset()
+        asset.client = client
+        asset.client_id = client_id
+        asset.site = site
+        asset.site_id = site_id
+        asset.type = asset_type
+        device_info = {field: device_xml.find(field).text for field in RMM_ASSETS_AT_CLIENT_FIELDS
+                       if device_xml.find(field) is not None}
+        asset.add_attributes_from_dict(device_info)
+        assets += [asset]
+
+
+assets_and_details = list()
+for asset in tqdm(assets, desc="Performing API requests for asset details..."):
+    if asset.type == "mobile_device":
+        assets_and_details += [(asset, str())]
+        continue
+    asset_details_response = api_get_asset_details(asset.id)
+    assets_and_details += [(asset, asset_details_response)]
+
+################ CONTINUE HERE
+for child in xml_et.fromstring(assets_and_details[30][1].text):
+    print(child.tag, child.attrib, child.text)
+
+
+
+
+["chassistype", "ip", "mac1", "mac2", "mac3"]
+
+    asset.add_attributes_from_dict(get_asset_details(asset.id))
+    assets_with_details += [asset]
+
+for asset in assets_with_details:
+    print(asset)
+
+
+
+
+
+
+
+    response_xml = xml_et.fromstring(response.text)
 
     # Define asset type as laptop if chassis type is 8-11 or 14
     chassis_type = response_xml.find("./chassistype").text
@@ -139,38 +247,3 @@ def get_asset_details(asset_id):
     asset["custom_fields"] = json.dumps(custom_fields)
 
     return asset
-
-
-################################
-# Load environmental variables #
-################################
-
-env_file_path = ".env"
-# dotenv_values just reads from file without assigning variables to environment.
-# use load_dotenv for the "real thing"
-env_variables = dotenv_values(env_file_path)
-RMM_BASE_URL = env_variables["RMM_BASE_URL"]
-RMM_API_KEY = env_variables["RMM_API_KEY"]
-
-
-###########
-# Execute #
-###########
-
-clients = get_clients()
-
-assets = list()
-for client_id in clients.values():
-    for asset_type in ["server", "workstation", "mobile_device"]:
-        assets += get_assets_at_client(client_id=client_id, asset_type=asset_type)
-
-assets_with_details = list()
-for asset in tqdm(assets, desc="Getting asset details..."):
-    if asset.type == "mobile_device":
-        assets_with_details += [asset]
-        continue
-    asset.add_attributes_from_dict(get_asset_details(asset.id))
-    assets_with_details += [asset]
-
-for asset in assets_with_details:
-    print(asset)

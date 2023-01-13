@@ -19,7 +19,7 @@ HALO_API_CLIENT_ID = env_variables["HALO_API_CLIENT_ID"]
 HALO_API_CLIENT_SECRET = env_variables["HALO_API_CLIENT_SECRET"]
 
 # Can't set several scopes?
-api_application_scope = ["read:assets"]
+api_application_scope = "read:assets"
 
 parameters = {
     "tenant": HALO_API_TENANT}
@@ -44,7 +44,7 @@ access_token = authentication_response_json["access_token"]
 # Assets #
 ##########
 
-HALO_API_ASSET_URL = env_variables["HALO_API_ASSET_URL"]    # Add e.g. to get custom fields + "/14/"
+HALO_API_ASSET_URL = env_variables["HALO_API_ASSET_URL"] + "/7/"   # To get custom fields add e.g. + "/14/"
 
 headers = {
     "Authorization": f"{access_token_type} {access_token}"}
@@ -52,13 +52,13 @@ headers = {
 
 # Seems that paginate, page_size and page_no have no effect.
 asset_parameters = {
-    "pageinate": 1,
-    "page_size": 4,
-    "page_no": 6
+    # "pageinate": 1,
+    # "page_size": 4,
+    # "page_no": 6
 }
 
 asset_response = requests.get(HALO_API_ASSET_URL, headers=headers, params=asset_parameters)
-assets = asset_response.json()["assets"]
+assets = asset_response.json()#["assets"]
 
 for i, asset in enumerate(assets):
     print(f"{i} | {asset['id']} | {asset['key_field']}")
