@@ -44,7 +44,7 @@ access_token = authentication_response_json["access_token"]
 # Assets #
 ##########
 
-HALO_API_ASSET_URL = env_variables["HALO_API_ASSET_URL"] + "/7/"   # To get custom fields add e.g. + "/14/"
+HALO_API_ASSET_URL = env_variables["HALO_API_ASSET_URL"]   # To get custom fields add e.g. + "/14/"
 
 headers = {
     "Authorization": f"{access_token_type} {access_token}"}
@@ -52,6 +52,7 @@ headers = {
 
 # Seems that paginate, page_size and page_no have no effect.
 asset_parameters = {
+    "includeassetfields": "true"
     # "pageinate": 1,
     # "page_size": 4,
     # "page_no": 6
@@ -59,9 +60,14 @@ asset_parameters = {
 
 asset_response = requests.get(HALO_API_ASSET_URL, headers=headers, params=asset_parameters)
 assets = asset_response.json()#["assets"]
+for asset in assets["assets"]:
+    if asset["id"] == 7:
+        print(asset)
 
-for i, asset in enumerate(assets):
-    print(f"{i} | {asset['id']} | {asset['key_field']}")
+type(assets)
+
+# for i, asset in enumerate(assets):
+#     print(f"{i} | {asset['id']} | {asset['key_field']}")
 
 # asset_response.json()["page_size"]
 # len(asset_response.json()["assets"])

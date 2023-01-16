@@ -1,25 +1,34 @@
 
-import re
-import requests
+# standard
 import json
 import logging
+import re
+import requests
 from time import sleep
+from functools import partial, wraps
+
+# internal
 import xml.etree.ElementTree as xml_et
 from tqdm import tqdm
 from dotenv import dotenv_values
-from functools import partial, wraps
 
 
 class Asset:
-    def add_attributes_from_dict(self, dictionary):
-        for key, value in dictionary.items():
+    def add_attributes_from_dict(self, parameters: dict) -> None:
+        """
+        Adds all items from the input dict to the Asset instance parameters.
+        :param parameters: dict with parameter: value pairs.
+        """
+        for key, value in parameters.items():
             setattr(self, key, value)
 
     def __str__(self):
-        return f"{self.id} | {self.client} | {self.name}"
+        return f"{getattr(self, 'id', 'unknown id')} | " \
+               f"{getattr(self, 'client', 'unknown client')} | " \
+               f"{getattr(self, 'name', 'unknown name')}"
 
 
-def retry_function(function=None, *, times: int = 3, interval_sec: float = 8.0,
+def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
                    exceptions: (Exception, tuple[Exception]) = Exception):
     """
     Retries the wrapped function. Meant to be used as a decorator.
@@ -54,8 +63,11 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 8.0,
 
 
 @retry_function
-def api_get_clients():
-
+def api_get_clients() -> requests.Response:
+    """
+    Queries the RMM API list_clients endpoint and returns the response.
+    :return: requests.Response object
+    """
     parameters = {
         "apikey": RMM_API_KEY,
         "service": "list_clients"}
@@ -73,14 +85,19 @@ def api_get_assets_at_client(client_id, asset_type):
         "devicetype": asset_type}
 
     response = requests.get(RMM_BASE_URL, params=request_parameters)
+    if not response.ok:
+        error_string = f"Got status code {response.status_code} while connecting to {response.url}. " \
+                       f"Reason: {response.reason}"
+        raise ConnectionError(error_string)
     return response
 
 
 def parse_role(role_id: str) -> str:
     """
+    Gives RMM asset role description based on role_id.
     https://documentation.n-able.com/remote-management/userguide/Content/listing_device_asset_details.htm
-    :param role_id:
-    :return:
+    :param role_id: role_id field from RMM API list_device_asset_details endpoint response.
+    :return: Role description
     """
     role_reference = {
         "0": "Windows workstation",
@@ -98,7 +115,7 @@ def parse_role(role_id: str) -> str:
 
     if role_id in role_reference:
         return role_reference[role_id]
-    return "unknown"
+    return f"unknown id {role_id}"
 
 
 @retry_function
@@ -109,7 +126,82 @@ def api_get_asset_details(device_id):
         "deviceid": device_id}
 
     response = requests.get(RMM_BASE_URL, params=request_parameters)
+    if not response.ok:
+        error_string = f"Got status code {response.status_code} while connecting to {response.url}. " \
+                       f"Reason: {response.reason}"
+        raise ConnectionError(error_string)
     return response
+
+
+def parse_asset_details(details_xml):
+    """
+
+    :param details_xml:
+    :return:
+    """
+    details = dict()
+    try:
+        # Define asset type as laptop if chassis type is 8-11 or 14
+        chassis_type = details_xml.find("./chassistype").text
+        if chassis_type in [8, 9, 10, 11, 14]:
+            details["type"] = "laptop"
+
+        # json of different ip-s
+        ips = {f"ip{i + 1}": ip_xml.text for i, ip_xml in enumerate(details_xml.findall("./ip"))}
+        details["ip"] = json.dumps(ips)
+
+        # json of different mac addresses
+        mac_fields = ["mac1", "mac2", "mac3"]
+        macs = {mac_field: details_xml.find(f"./{mac_field}").text for mac_field in mac_fields}
+        details["mac"] = json.dumps(macs)
+
+        details["user"] = details_xml.find("./user").text
+        details["manufacturer"] = details_xml.find("./manufacturer").text
+        details["model"] = details_xml.find("./model").text
+        details["os"] = details_xml.find("./os").text
+
+        # Parse only the date component from os install date and time
+        date_pattern = re.compile(r"\d{4}-\d{2}-\d{2}")
+        osinstalldate = details_xml.find("./osinstalldate").text
+        if osinstalldate:
+            details["os_install_date"] = date_pattern.findall(osinstalldate)[0]
+
+        details["serial_number"] = details_xml.find("./serialnumber").text
+        details["product_key"] = details_xml.find("./productkey").text
+
+        role = details_xml.find("./role").text
+        details["device_role"] = parse_role(role)
+
+        ram = details_xml.find("./ram").text
+        if ram:
+            details["ram_gb"] = float(ram) / 2 ** 10 / 2 ** 10 / 2 ** 10
+
+        # Make a dict of custom fields {fieldname: value}
+        custom_fields_xml = [details_xml.find(f"./custom{i}") for i in range(11)]
+        custom_fields = {element.attrib["customname"]: element.text for element in custom_fields_xml if element is not None}
+        # convert to json format
+        details["custom_fields"] = json.dumps(custom_fields)
+        existing_details = {key: value for key, value in details.items() if value not in [None, ""]}
+
+        return existing_details
+
+    # Try to give informative errors when parsing of some field fails.
+    except Exception as exception:
+        expected_fields = ["type", "ip", "mac", "user", "manufacturer", "model", "os", "os_install_date",
+                           "serial_number", "product_key", "device_role", "ram_gb", "custom_fields"]
+
+        parsed_fields = details.keys()
+        non_parsed_fields = [field for field in expected_fields if field not in parsed_fields]
+        device_identity = []
+        if details_xml.find("./client"):
+            device_identity += [f"Client:{details_xml.find('./client').text}"]
+        device_identity += [f"User:{details.get('user', 'unknown')}",
+                            f"Manufacturer:{details.get('manufacturer', 'unknown')}"]
+        warning_string = f"While parsing device details for device {'|'.join(device_identity)} " \
+                         f"{type(exception).__name__} occurred: {exception}.\n" \
+                         f"Parsing of the following fields succeeded: {', '.join(parsed_fields)}.\n" \
+                         f"The problem could be in one of these fields: {', '.join(non_parsed_fields)}"
+        raise UserWarning(warning_string)
 
 
 ################################
@@ -159,7 +251,6 @@ for client_asset in client_assets:
             "asset_type": asset_type,
             "xml": site_xml}]
 
-
 assets = list()
 for site_asset in site_assets:
     client, client_id, site, site_id, asset_type, site_xml = site_asset.values()
@@ -176,74 +267,17 @@ for site_asset in site_assets:
         assets += [asset]
 
 
-assets_and_details = list()
 for asset in tqdm(assets, desc="Performing API requests for asset details..."):
-    if asset.type == "mobile_device":
-        assets_and_details += [(asset, str())]
+    if asset.type == "mobile_device":   # RMM API has no asset_details for mobile devices.
         continue
     asset_details_response = api_get_asset_details(asset.id)
-    assets_and_details += [(asset, asset_details_response)]
+    ######### Bring error handling device identification outside
+    asset_details = parse_asset_details(xml_et.fromstring(asset_details_response.text))
+    asset.add_attributes_from_dict(asset_details)
 
-################ CONTINUE HERE
-for child in xml_et.fromstring(assets_and_details[30][1].text):
-    print(child.tag, child.attrib, child.text)
+# for asset in assets:
+#     print(asset.ip)
+#
+# test = api_get_asset_details(assets[0].id)
+# parse_asset_details(xml_et.fromstring(test.text))
 
-
-
-
-["chassistype", "ip", "mac1", "mac2", "mac3"]
-
-    asset.add_attributes_from_dict(get_asset_details(asset.id))
-    assets_with_details += [asset]
-
-for asset in assets_with_details:
-    print(asset)
-
-
-
-
-
-
-
-    response_xml = xml_et.fromstring(response.text)
-
-    # Define asset type as laptop if chassis type is 8-11 or 14
-    chassis_type = response_xml.find("./chassistype").text
-    if chassis_type in [8, 9, 10, 11, 14]:
-        asset["type"] = "laptop"
-
-    # json of different ip-s
-    ips = {f"ip{i + 1}": ip_xml.text for i, ip_xml in enumerate(response_xml.findall("./ip"))}
-    asset["ip"] = json.dumps(ips)
-
-    # json of different mac addresses
-    mac_fields = ["mac1", "mac2", "mac3"]
-    macs = {mac_field: response_xml.find(f"./{mac_field}").text for mac_field in mac_fields}
-    asset["mac"] = json.dumps(macs)
-
-    asset["user"] = response_xml.find("./user").text
-    asset["manufacturer"] = response_xml.find("./manufacturer").text
-    asset["model"] = response_xml.find("./model").text
-    asset["os"] = response_xml.find("./os").text
-
-    # Parse only the date string from os install date and time
-    date_pattern = re.compile(r"\d{4}-\d{2}-\d{2}")
-    osinstalldate = response_xml.find("./osinstalldate").text
-    asset["os_install_date"] = date_pattern.findall(osinstalldate)[0] if osinstalldate else None
-
-    asset["serial_number"] = response_xml.find("./serialnumber").text
-    asset["product_key"] = response_xml.find("./productkey").text
-
-    role = response_xml.find("./role").text
-    asset["device_role"] = parse_role(role)
-
-    ram = response_xml.find("./ram").text
-    asset["ram_gb"] = float(ram) / 2 ** 10 / 2 ** 10 / 2 ** 10 if ram else None
-
-    # Make a dict of custom fields {fieldname: value}
-    custom_fields_xml = [response_xml.find(f"./custom{i}") for i in range(11)]
-    custom_fields = {element.attrib["customname"]: element.text for element in custom_fields_xml if element is not None}
-    # convert to json format
-    asset["custom_fields"] = json.dumps(custom_fields)
-
-    return asset
