@@ -8,7 +8,7 @@ from time import sleep
 from functools import partial, wraps
 
 # internal
-import xml.etree.ElementTree as xml_et
+import xml.etree.ElementTree as xml_ET
 from tqdm import tqdm
 from dotenv import dotenv_values
 
@@ -48,7 +48,7 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
             try:
                 successful_result = function(*args, **kwargs)
             except exceptions as exception:
-                log_string = f"Retrying function {function.__name__} in {round(interval, 2)} seconds, " \
+                log_string = f"Retrying function {function.__name__} in {round(interval_sec, 2)} seconds, " \
                              f"because {type(exception).__name__} exception occurred: {exception}\n" \
                              f"Attempt {attempt} of {times}."
                 logging.exception(log_string)
@@ -115,7 +115,32 @@ def parse_role(role_id: str) -> str:
 
     if role_id in role_reference:
         return role_reference[role_id]
-    return f"unknown id {role_id}"
+    return f"unknown role id: {role_id}"
+
+
+def parse_hardware_type(type_id: str) -> str:
+
+    hardware_type_reference = {
+        "1": "Network Adapter",
+        "2": "BIOS",
+        "3": "Sound device",
+        "4": "Motherboard",
+        "5": "Keyboard",
+        "6": "Pointing device",
+        "7": "Monitor",
+        "8": "Video Controller",
+        "9": "Disk Drive",
+        "10": "Logical Disk",
+        "11": "Physical Memory",
+        "12": "Cache Memory",
+        "13": "Processor",
+        "14": "Tape Drive",
+        "15": "Optical Drive",
+        "16": "Floppy Disk Drive"}
+
+    if type_id in hardware_type_reference:
+        return hardware_type_reference[type_id]
+    return f"unknown hardware id: {type_id}"
 
 
 @retry_function
@@ -131,6 +156,52 @@ def api_get_asset_details(device_id):
                        f"Reason: {response.reason}"
         raise ConnectionError(error_string)
     return response
+
+
+def get_hardware_items(hardware_items_xml):
+    hardware_items = []
+    for item in hardware_items_xml:
+        hardware_item = dict()
+        hardware_item["hardwareid"] = item.find("./hardwareid").text
+        hardware_item["name"] = item.find("./name").text
+        hardware_item["type"] = parse_hardware_type(item.find("./type").text)
+        hardware_item["manufacturer"] = item.find("./manufacturer").text
+        hardware_item["details"] = item.find("./details").text
+        hardware_item["status"] = item.find("./status").text
+        hardware_item["modified"] = item.find("./modified").text
+        hardware_item["deleted"] = item.find("./deleted").text
+        hardware_items += [hardware_item]
+
+    return hardware_items
+
+
+def parse_cpu(hardware_items: list[dict]) -> dict:
+    processors = [item for item in hardware_items if item["type"].lower() == "processor"]
+    cpu = dict()
+    for i, processor in enumerate(processors):
+        fields_of_interest = ["manufacturer", "name"]
+        cpu_fields_of_interest = [processor.get(field, None) for field in fields_of_interest]
+        cpu_fields_of_interest_non_empty = [re.sub(" +", " ", field) for field in cpu_fields_of_interest
+                                            if field not in ["", " ", None]]
+        cpu[f"cpu{i + 1}"] = " | ".join(cpu_fields_of_interest_non_empty)
+    return cpu
+
+
+def parse_disks(hardware_items: list[dict]) -> dict:
+    hdds = [item for item in hardware_items if item["type"].lower() == "disk drive"]
+    interface_pattern = re.compile(r"InterfaceType=(.*)\n")
+    size_pattern = re.compile(r"Size=(\d+)$")
+    disk = dict()
+    for i, hdd in enumerate(hdds):
+        name = re.sub(" +", " ", hdd.get("name", None))
+        interface_match = interface_pattern.findall(hdd.get("details", None))
+        interface = interface_match[0] if interface_match else None
+        size_match = size_pattern.findall(hdd.get("details", None))
+        size_gb = round(float(size_match[0]) / 2 ** 10 / 2 ** 10 / 2 ** 10, 2) if size_match else None
+        size_string = f"{size_gb} GB" if size_gb else None
+        disk_fields_non_empty = [field for field in [interface, name, size_string] if field not in [None, "", " "]]
+        disk[f"disk{i + 1}"] = " | ".join(disk_fields_non_empty)
+    return disk
 
 
 def parse_asset_details(details_xml):
@@ -176,9 +247,11 @@ def parse_asset_details(details_xml):
         if ram:
             details["ram_gb"] = float(ram) / 2 ** 10 / 2 ** 10 / 2 ** 10
 
-        # Make a dict of custom fields {fieldname: value}
+        # Check for up to 10 custom fields (RMM custom field limit)
         custom_fields_xml = [details_xml.find(f"./custom{i}") for i in range(11)]
-        custom_fields = {element.attrib["customname"]: element.text for element in custom_fields_xml if element is not None}
+        # Make a dict of custom fields {fieldname: value}
+        custom_fields = {element.attrib["customname"]: element.text for element in custom_fields_xml
+                         if element is not None}
         # convert to json format
         details["custom_fields"] = json.dumps(custom_fields)
         existing_details = {key: value for key, value in details.items() if value not in [None, ""]}
@@ -223,7 +296,7 @@ RMM_ASSETS_AT_CLIENT_FIELDS = json.loads(env_variables["RMM_ASSETS_AT_CLIENT_FIE
 ###########
 
 clients_response = api_get_clients()
-response_xml = xml_et.fromstring(clients_response.text)
+response_xml = xml_ET.fromstring(clients_response.text)
 clients = dict()
 for client in response_xml.findall("./items/client"):
     clients[client.find("./name").text] = client.find("./clientid").text
@@ -232,7 +305,7 @@ client_assets = list()
 for client, client_id in clients.items():
     for asset_type in RMM_ASSET_TYPES:
         client_asset_response = api_get_assets_at_client(client_id=client_id, asset_type=asset_type)
-        client_xml = xml_et.fromstring(client_asset_response.text)
+        client_xml = xml_ET.fromstring(client_asset_response.text)
         client_assets += [{
             "client": client,
             "client_id": client_id,
@@ -251,7 +324,7 @@ for client_asset in client_assets:
             "asset_type": asset_type,
             "xml": site_xml}]
 
-assets = list()
+rmm_assets_basic = list()
 for site_asset in site_assets:
     client, client_id, site, site_id, asset_type, site_xml = site_asset.values()
     for device_xml in site_xml.findall(asset_type):
@@ -264,20 +337,31 @@ for site_asset in site_assets:
         device_info = {field: device_xml.find(field).text for field in RMM_ASSETS_AT_CLIENT_FIELDS
                        if device_xml.find(field) is not None}
         asset.add_attributes_from_dict(device_info)
-        assets += [asset]
+        rmm_assets_basic += [asset]
 
-
-for asset in tqdm(assets, desc="Performing API requests for asset details..."):
+rmm_asset_details_responses = list()
+for asset in tqdm(rmm_assets_basic, desc="Performing API requests for asset details..."):
     if asset.type == "mobile_device":   # RMM API has no asset_details for mobile devices.
+        rmm_asset_details_responses += [{"asset": asset, "xml": None}]
         continue
     asset_details_response = api_get_asset_details(asset.id)
+    rmm_asset_details_responses += [{"asset": asset, "xml": xml_ET.fromstring(asset_details_response.text)}]
     ######### Bring error handling device identification outside
-    asset_details = parse_asset_details(xml_et.fromstring(asset_details_response.text))
-    asset.add_attributes_from_dict(asset_details)
 
-# for asset in assets:
-#     print(asset.ip)
-#
-# test = api_get_asset_details(assets[0].id)
-# parse_asset_details(xml_et.fromstring(test.text))
 
+rmm_assets_detailed = list()
+for element in rmm_asset_details_responses:
+    asset, details_xml = element.values()
+    if details_xml:
+        asset_details = parse_asset_details(details_xml)
+        hardware_items = get_hardware_items(details_xml.find("./hardware"))
+        asset.cpu = parse_cpu(hardware_items)
+        asset.disk = parse_disks(hardware_items)
+        asset.add_attributes_from_dict(asset_details)
+    rmm_assets_detailed += [asset]
+######## Next up, parse monitor
+
+
+for asset in rmm_assets_detailed:
+    if "cpu" in vars(asset):
+        print(asset.cpu, asset.disk)

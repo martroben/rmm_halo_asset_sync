@@ -40,34 +40,35 @@ access_token_type = authentication_response_json["token_type"]
 access_token = authentication_response_json["access_token"]
 
 
-##########
-# Assets #
-##########
+###############
+# Pull assets #
+###############
 
-HALO_API_ASSET_URL = env_variables["HALO_API_ASSET_URL"]   # To get custom fields add e.g. + "/14/"
+HALO_API_ASSET_URL = env_variables["HALO_API_ASSET_URL"]
 
 headers = {
     "Authorization": f"{access_token_type} {access_token}"}
 
-
-# Seems that paginate, page_size and page_no have no effect.
-asset_parameters = {
-    "includeassetfields": "true"
-    # "pageinate": 1,
-    # "page_size": 4,
-    # "page_no": 6
-}
-
+# Asset requests need to have assettype_id as parameter to get custom fields.
+# Query assets endpoint to get all assettype_id-s:
+asset_parameters = {}
 asset_response = requests.get(HALO_API_ASSET_URL, headers=headers, params=asset_parameters)
-assets = asset_response.json()#["assets"]
-for asset in assets["assets"]:
-    if asset["id"] == 7:
-        print(asset)
+assettype_ids = dict()
+for asset in asset_response.json()["assets"]:
+    if asset["assettype_id"] not in assettype_ids:
+        assettype_ids[asset["assettype_id"]] = asset["assettype_name"]
 
-type(assets)
+# Query assets endpoint again to get asset info with custom fields
+halo_assets = list()
+for assettype_id in assettype_ids:
+    assets_with_fields_parameters = {
+        "includeassetfields": "true",
+        "assettype_id": assettype_id}
+    asset_with_fields_response = requests.get(HALO_API_ASSET_URL, headers=headers, params=assets_with_fields_parameters)
+    halo_assets += asset_with_fields_response.json()["assets"]
 
-# for i, asset in enumerate(assets):
-#     print(f"{i} | {asset['id']} | {asset['key_field']}")
-
-# asset_response.json()["page_size"]
-# len(asset_response.json()["assets"])
+for asset in halo_assets:
+    for key, value in asset.items():
+        if value not in ("", 0):
+            print(f"{key} || {value}")
+    print("-"*50)
