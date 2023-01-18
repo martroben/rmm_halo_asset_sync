@@ -1,4 +1,7 @@
 .env
+halo_rmm_fields.txt
+sample_halo_fields.txt
+sample_rmm_fields.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
