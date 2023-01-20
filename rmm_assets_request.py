@@ -5,14 +5,14 @@ import logging
 import os
 import re
 import requests
-import sys              # Needed to send log stream to stdout in debug mode
+import sys                                  # needed to send log stream to stdout in debug mode
 from time import sleep
 from functools import partial, wraps
 
 # external
-import xml.etree.ElementTree as xml_ET
-from tqdm import tqdm
-from dotenv import dotenv_values
+import xml.etree.ElementTree as xml_ET      # xml parser
+from tqdm import tqdm                       # progress bar
+from dotenv import dotenv_values            # loading environmental variables
 
 
 class Asset:
@@ -28,6 +28,10 @@ class Asset:
         return f"{getattr(self, 'id', 'unknown id')} | " \
                f"{getattr(self, 'client', 'unknown client')} | " \
                f"{getattr(self, 'name', 'unknown name')}"
+
+    standard_attributes = ["type", "ip", "mac", "user", "manufacturer", "model", "os", "os_install_date",
+                           "serial_number", "product_key", "device_role", "ram_gb", "custom_fields",
+                           "cpu", "disk", "monitor"]
 
 
 def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
@@ -67,6 +71,7 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
 @retry_function
 def api_get_clients() -> requests.Response:
     """
+    https://documentation.n-able.com/remote-management/userguide/Content/listing_clients_.htm
     Queries the RMM API list_clients endpoint and returns the response.
     :return: requests.Response object
     """
@@ -81,6 +86,7 @@ def api_get_clients() -> requests.Response:
 def api_get_assets_at_client(client_id: (str, int), asset_type: str) -> requests.Response:
     """
     Queries the RMM API list_devices_at_client endpoint and returns the response
+    https://documentation.n-able.com/remote-management/userguide/Content/listing_devices_at_client_.htm
     :param client_id: RMM Client id to query
     :param asset_type: RMM asset type (workstation, server, mobile device)
     :return: requests.Response object
@@ -159,6 +165,7 @@ def parse_hardware_type(type_id: str) -> str:
 def api_get_asset_details(device_id: (str, int)) -> requests.Response:
     """
     Queries the RMM API list_device_asset_details endpoint and returns the response.
+    https://documentation.n-able.com/remote-management/userguide/Content/listing_device_asset_details.htm
     :param device_id: RMM device id.
     :return: requests.Response object.
     """
@@ -322,11 +329,8 @@ def parse_asset_details(details_xml: xml_ET.Element) -> dict:
 
     # Give informative error if parsing of some field fails.
     except Exception as exception:
-        expected_fields = ["type", "ip", "mac", "user", "manufacturer", "model", "os", "os_install_date",
-                           "serial_number", "product_key", "device_role", "ram_gb", "custom_fields",
-                           "cpu", "disk", "monitor"]
         parsed_fields = details.keys()
-        non_parsed_fields = [field for field in expected_fields if field not in parsed_fields]
+        non_parsed_fields = [field for field in Asset.standard_attributes if field not in parsed_fields]
         warning_string = f"{type(exception).__name__} occurred: {exception}.\n" \
                          f"Parsing of the following fields succeeded: {', '.join(parsed_fields)}.\n" \
                          f"The problem could be in one of these fields: {', '.join(non_parsed_fields)}"
@@ -464,4 +468,8 @@ def main() -> list[Asset]:
 ###########
 
 if __name__ == "__main__":
-    main()
+    rmm_assets = main()
+
+    for asset in rmm_assets:
+        print(asset.id)
+
