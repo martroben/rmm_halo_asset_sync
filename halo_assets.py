@@ -7,14 +7,19 @@ import os
 from dotenv import dotenv_values
 
 
-##################
-# Authentication #
-##################
+##################################
+# Set up environmental variables #
+##################################
 
 env_file_path = ".env"
 # dotenv_values just reads from file without assigning variables to environment.
 # use load_dotenv for the "real thing"
 env_variables = dotenv_values(env_file_path)
+
+
+##################
+# Authentication #
+##################
 
 HALO_API_AUTHENTICATION_URL = env_variables["HALO_API_AUTHENTICATION_URL"]
 HALO_API_TENANT = env_variables["HALO_API_TENANT"]
@@ -42,6 +47,81 @@ authentication_response = requests.post(
 authentication_response_json = authentication_response.json()
 access_token_type = authentication_response_json["token_type"]
 access_token = authentication_response_json["access_token"]
+
+
+####################
+# Get asset groups #
+####################
+
+HALO_API_ASSET_GROUP_URL = env_variables["HALO_API_ASSET_GROUP_URL"]
+headers = {
+    "Authorization": f"{access_token_type} {access_token}"}
+
+asset_group_parameters = {}
+asset_group_response = requests.get(
+    url=HALO_API_ASSET_GROUP_URL,
+    headers=headers,
+    params=asset_group_parameters)
+
+for asset_group in asset_group_response.json():
+    print(asset_group["name"], asset_group["id"])
+
+
+#####################
+# Post asset groups #
+#####################
+
+headers = {
+    "Authorization": f"{access_token_type} {access_token}"}
+
+post_asset_group_payload = [{
+    "name": "Mart test asset group 3",
+    "nominalcodepurchase": str(),
+    "showasequip": True,
+    "tax_id": "0",
+    "tax_id_purchase": "0"}]
+
+post_asset_group_response = requests.post(
+    url=HALO_API_ASSET_GROUP_URL,
+    headers=headers,
+    json=post_asset_group_payload)
+
+
+####################
+# Pull asset types #
+####################
+
+HALO_API_ASSET_TYPE_URL = env_variables["HALO_API_ASSET_TYPE_URL"]
+headers = {
+    "Authorization": f"{access_token_type} {access_token}"}
+
+asset_type_parameters = {}
+asset_type_response = requests.get(
+    url=HALO_API_ASSET_TYPE_URL,
+    headers=headers,
+    params=asset_type_parameters)
+
+for asset_type in asset_type_response.json():
+    print(asset_type["name"], asset_type["id"])
+
+
+#####################
+# Pull asset fields #
+#####################
+
+HALO_API_FIELD_URL = env_variables["HALO_API_FIELD_URL"]
+headers = {
+    "Authorization": f"{access_token_type} {access_token}"}
+
+field_parameters = {}
+field_response = requests.get(
+    url=HALO_API_FIELD_URL,
+    headers=headers,
+    params=field_parameters)
+
+asset_field_ids = dict()
+for field in field_response.json():
+    asset_field_ids[field["name"]] = field["id"]
 
 
 ###############
@@ -86,6 +166,10 @@ for asset in halo_assets:
 #         if value not in ("", 0):
 #             print(f"{key} || {value}")
 #     print("-"*50)
+
+
+
+
 
 
 #############################
@@ -174,7 +258,7 @@ for backup_path, date in backups_dates:
         all_backup_files += [(os.path.join(session_path, file), date, session, file)
                              for file in os.listdir(session_path)]
 
-device_identifier = "4CE0460D0F"
+
 def find_device_backups(device_identifier):
     device_backups = list()
     for file in all_backup_files:
@@ -192,6 +276,8 @@ def find_device_backups(device_identifier):
             device_backups += [file]
     return device_backups
 
+
+device_identifier = "4CE0460D0F"
 find_device_backups(device_identifier)
 
 
