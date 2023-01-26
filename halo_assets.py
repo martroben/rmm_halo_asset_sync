@@ -1,10 +1,34 @@
 
+
 import json
+import random
 from datetime import datetime
 import requests
 import os
 
 from dotenv import dotenv_values
+
+
+##############
+# Functions #
+#############
+
+def generate_random_hex(length):
+    decimals = random.choices(range(16), k=length)
+    hexadecimal = "".join(["{:x}".format(decimal) for decimal in decimals])
+    return hexadecimal
+
+def get_temporary_id():
+
+    temporary_id_components = [
+        generate_random_hex(8),
+        generate_random_hex(4),
+        generate_random_hex(4),
+        generate_random_hex(4),
+        generate_random_hex(12)]
+
+    temporary_id = "-".join(temporary_id_components)
+    return temporary_id
 
 
 ##################################
@@ -105,23 +129,89 @@ for asset_type in asset_type_response.json():
     print(asset_type["name"], asset_type["id"])
 
 
+####################
+# Post asset types #
+####################
+
+headers = {
+    "Authorization": f"{access_token_type} {access_token}"}
+
+post_asset_type_payload = {
+    "name": "Mart test asset type 2",
+    "assetgroup_id": 112,
+    "defaultsequence": 0,
+    "show_to_users": True,
+    "fiid": -1,
+    "fields": [
+        {"field_id": 148,
+         "field_name": "Mart test field",
+         "_temp_id": get_temporary_id()}],
+    "weeklycost": 0,
+    "monthlycost": 0,
+    "quarterlycost": 0,
+    "sixmonthlycost": 0,
+    "yearlycost": 0,
+    "twoyearlycost": 0,
+    "threeyearlycost": 0,
+    "fouryearlycost": 0,
+    "fiveyearlycost": 0,
+    "linkedcontracttype": -1,
+    "enableresourcebooking": False,
+    "resourcebooking_workdays_id": 1,
+    "resourcebooking_allow_asset_selection": False,
+    "resourcebooking_asset_restriction_type": 0,
+    "resourcebooking_min_hours_advance": 1,
+    "resourcebooking_max_days_advance": 365,
+    "xtype_roles": [
+        {"_temp_id": get_temporary_id()}],
+    "allowall_status": True}
+
+####### Gives 403 (forbidden)
+post_asset_type_response = requests.post(
+    url=HALO_API_ASSET_TYPE_URL,
+    headers=headers,
+    json=post_asset_type_payload)
+
+
 #####################
 # Pull asset fields #
 #####################
 
-HALO_API_FIELD_URL = env_variables["HALO_API_FIELD_URL"]
+HALO_API_ASSET_FIELD_URL = env_variables["HALO_API_ASSET_FIELD_URL"]
 headers = {
     "Authorization": f"{access_token_type} {access_token}"}
 
 field_parameters = {}
 field_response = requests.get(
-    url=HALO_API_FIELD_URL,
+    url=HALO_API_ASSET_FIELD_URL,
     headers=headers,
     params=field_parameters)
 
 asset_field_ids = dict()
 for field in field_response.json():
     asset_field_ids[field["name"]] = field["id"]
+
+
+#####################
+# Post asset fields #
+#####################
+
+headers = {
+    "Authorization": f"{access_token_type} {access_token}"}
+
+post_asset_field_payload = {
+    "kind": "T",
+    "parenttype_id": "0",
+    "name": "Mart test field2",
+    "validate": "X",
+    "systemuse": "0",
+    "order_values_alphanumerically": True}
+
+############ Returns 403 (forbidden)
+post_asset_type_response = requests.post(
+    url=HALO_API_ASSET_FIELD_URL,
+    headers=headers,
+    json=post_asset_field_payload)
 
 
 ###############
