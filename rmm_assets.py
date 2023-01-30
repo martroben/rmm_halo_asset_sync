@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import requests
-import sys                                  # needed to send log stream to stdout in debug mode
+# import sys                                  # needed to send log stream to stdout in debug mode
 from time import sleep
 from functools import partial, wraps
 
