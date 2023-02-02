@@ -15,10 +15,10 @@ from tqdm import tqdm                       # progress bar
 from dotenv import dotenv_values            # loading environmental variables
 
 
-class Asset:
+class RMM_asset:
     def add_attributes_from_dict(self, parameters: dict) -> None:
         """
-        Adds all items from the input dict to the Asset instance parameters.
+        Adds all items from the input dict to the RMM_asset instance parameters.
         :param parameters: dict with parameter: value pairs.
         """
         for key, value in parameters.items():
@@ -29,7 +29,7 @@ class Asset:
                f"{getattr(self, 'client', 'unknown client')} | " \
                f"{getattr(self, 'name', 'unknown name')}"
 
-    standard_attributes = ["type", "ip", "mac", "user", "manufacturer", "model", "os", "os_install_date",
+    standard_attributes = ["type", "ip", "mac", "user", "model", "os", "os_install_date",
                            "serial_number", "product_key", "device_role", "ram_gb", "custom_fields",
                            "cpu", "disk", "monitor"]
 
@@ -287,8 +287,9 @@ def parse_asset_details(details_xml: xml_ET.Element) -> dict:
         details["mac"] = json.dumps(macs)
 
         details["user"] = details_xml.find("./user").text
-        details["manufacturer"] = details_xml.find("./manufacturer").text
-        details["model"] = details_xml.find("./model").text
+        manufacturer = details_xml.find("./manufacturer").text
+        model = details_xml.find("./model").text
+        details["model"] = f"{manufacturer} {model}"
         details["os"] = details_xml.find("./os").text
 
         # Parse only the date component from os install date and time
@@ -330,7 +331,7 @@ def parse_asset_details(details_xml: xml_ET.Element) -> dict:
     # Give informative error if parsing of some field fails.
     except Exception as exception:
         parsed_fields = details.keys()
-        non_parsed_fields = [field for field in Asset.standard_attributes if field not in parsed_fields]
+        non_parsed_fields = [field for field in RMM_asset.standard_attributes if field not in parsed_fields]
         warning_string = f"{type(exception).__name__} occurred: {exception}.\n" \
                          f"Parsing of the following fields succeeded: {', '.join(parsed_fields)}.\n" \
                          f"The problem could be in one of these fields: {', '.join(non_parsed_fields)}"
@@ -371,105 +372,98 @@ RMM_ASSET_TYPES = json.loads(env_variables["RMM_ASSET_TYPES"])
 RMM_ASSETS_AT_CLIENT_FIELDS = json.loads(env_variables["RMM_ASSETS_AT_CLIENT_FIELDS"])
 
 
-########
-# Main #
-########
-
-def main() -> list[Asset]:
-    # Query API for a list of Clients
-    clients_response = api_get_clients()
-    logging.debug("\n\nClient list API request response:")
-    logging.debug(clients_response.text)
-    response_xml = xml_ET.fromstring(clients_response.text)
-    clients = dict()
-    for client in response_xml.findall("./items/client"):
-        clients[client.find("./name").text] = client.find("./clientid").text
-
-    # Query API for a list of devices under each Client
-    client_assets = list()
-    for client, client_id in clients.items():
-        for asset_type in RMM_ASSET_TYPES:
-            client_asset_response = api_get_assets_at_client(client_id=client_id, asset_type=asset_type)
-            logging.debug(f"\n\nGet assets at client API request response for client {client} asset type {asset_type}:")
-            logging.debug(client_asset_response.text)
-            client_xml = xml_ET.fromstring(client_asset_response.text)
-            client_assets += [{
-                "client": client,
-                "client_id": client_id,
-                "asset_type": asset_type,
-                "xml": client_xml}]
-
-    # Subdivide the device list by Site
-    site_assets = list()
-    for client_asset in client_assets:
-        client, client_id, asset_type, client_xml = client_asset.values()
-        for site_xml in client_xml.findall("./items/client/site"):
-            site_assets += [{
-                "client": client,
-                "client_id": client_id,
-                "site": site_xml.find("name").text,
-                "site_id": site_xml.find("id").text,
-                "asset_type": asset_type,
-                "xml": site_xml}]
-
-    # Subdivide the device list by individual device
-    rmm_assets_basic = list()
-    for site_asset in site_assets:
-        client, client_id, site, site_id, asset_type, site_xml = site_asset.values()
-        for device_xml in site_xml.findall(asset_type):
-            asset = Asset()
-            asset.client = client
-            asset.client_id = client_id
-            asset.site = site
-            asset.site_id = site_id
-            asset.type = asset_type
-            device_info = {field: device_xml.find(field).text for field in RMM_ASSETS_AT_CLIENT_FIELDS
-                           if device_xml.find(field) is not None}
-            asset.add_attributes_from_dict(device_info)
-            rmm_assets_basic += [asset]
-
-    # Query API for asset tracking details for each device
-    rmm_asset_details_responses = list()
-    for asset in tqdm(rmm_assets_basic, desc="Performing API requests for asset details..."):
-        logging.debug(f"\n\nAsset details API request response for '{asset}':")
-        if asset.type == "mobile_device":   # RMM API has no asset_details for mobile devices.
-            rmm_asset_details_responses += [{"asset": asset, "xml": None}]
-            continue
-        try:
-            asset_details_response = api_get_asset_details(asset.id)
-            rmm_asset_details_responses += [{"asset": asset, "xml": xml_ET.fromstring(asset_details_response.text)}]
-            logging.debug(asset_details_response.text)
-        except Exception as exception:
-            log_string = f"While performing API request for device asset details for device '{asset}' " \
-                         f"{type(exception).__name__} occurred: {exception}.\n"
-            logging.warning(log_string)
-            del log_string
-
-    # Parse asset tracking details from the API responses
-    rmm_assets_detailed = list()
-    for element in rmm_asset_details_responses:
-        asset, details_xml = element.values()
-        if details_xml:
-            try:
-                asset_details = parse_asset_details(details_xml)
-                asset.add_attributes_from_dict(asset_details)
-            except Exception as exception:
-                log_string = f"While parsing device asset details for '{asset}' " \
-                             f"{type(exception).__name__} occurred: {exception}.\n"
-                logging.warning(log_string)
-                del log_string
-        rmm_assets_detailed += [asset]
-
-    return rmm_assets_detailed
-
-
 ###########
 # Execute #
 ###########
 
-if __name__ == "__main__":
-    rmm_assets = main()
+# Query API for a list of Clients
+clients_response = api_get_clients()
+logging.debug("\n\nClient list API request response:")
+logging.debug(clients_response.text)
+response_xml = xml_ET.fromstring(clients_response.text)
+clients = dict()
+for client in response_xml.findall("./items/client"):
+    clients[client.find("./name").text] = client.find("./clientid").text
 
-    for asset in rmm_assets:
-        print(asset.id)
+# Query API for a list of devices under each Client
+client_assets = list()
+for client, client_id in clients.items():
+    for asset_type in RMM_ASSET_TYPES:
+        client_asset_response = api_get_assets_at_client(client_id=client_id, asset_type=asset_type)
+        logging.debug(f"\n\nGet assets at client API request response for client {client} asset type {asset_type}:")
+        logging.debug(client_asset_response.text)
+        client_xml = xml_ET.fromstring(client_asset_response.text)
+        client_assets += [{
+            "client": client,
+            "client_id": client_id,
+            "asset_type": asset_type,
+            "xml": client_xml}]
 
+# Subdivide the device list by Site
+site_assets = list()
+for client_asset in client_assets:
+    client, client_id, asset_type, client_xml = client_asset.values()
+    for site_xml in client_xml.findall("./items/client/site"):
+        site_assets += [{
+            "client": client,
+            "client_id": client_id,
+            "site": site_xml.find("name").text,
+            "site_id": site_xml.find("id").text,
+            "asset_type": asset_type,
+            "xml": site_xml}]
+
+# Subdivide the device list by individual device
+rmm_assets_basic = list()
+for site_asset in site_assets:
+    client, client_id, site, site_id, asset_type, site_xml = site_asset.values()
+    for device_xml in site_xml.findall(asset_type):
+        asset = RMM_asset()
+        asset.client = client
+        asset.client_id = client_id
+        asset.site = site
+        asset.site_id = site_id
+        asset.type = asset_type
+        device_info = {field: device_xml.find(field).text for field in RMM_ASSETS_AT_CLIENT_FIELDS
+                       if device_xml.find(field) is not None}
+        asset.add_attributes_from_dict(device_info)
+        rmm_assets_basic += [asset]
+
+# Query API for asset tracking details for each device
+rmm_asset_details_responses = list()
+for asset in tqdm(rmm_assets_basic, desc="Performing API requests for asset details..."):
+    logging.debug(f"\n\nAsset details API request response for '{asset}':")
+    if asset.type == "mobile_device":   # RMM API has no asset_details for mobile devices.
+        rmm_asset_details_responses += [{"asset": asset, "xml": None}]
+        continue
+    try:
+        asset_details_response = api_get_asset_details(asset.id)
+        rmm_asset_details_responses += [{"asset": asset, "xml": xml_ET.fromstring(asset_details_response.text)}]
+        logging.debug(asset_details_response.text)
+    except Exception as exception:
+        log_string = f"While performing API request for device asset details for device '{asset}' " \
+                     f"{type(exception).__name__} occurred: {exception}.\n"
+        logging.warning(log_string)
+        del log_string
+
+# Parse asset tracking details from the API responses
+rmm_assets_detailed = list()
+for element in rmm_asset_details_responses:
+    asset, details_xml = element.values()
+    if details_xml:
+        try:
+            asset_details = parse_asset_details(details_xml)
+            asset.add_attributes_from_dict(asset_details)
+        except Exception as exception:
+            log_string = f"While parsing device asset details for '{asset}' " \
+                         f"{type(exception).__name__} occurred: {exception}.\n"
+            logging.warning(log_string)
+            del log_string
+    rmm_assets_detailed += [asset]
+
+for asset in rmm_assets_detailed:
+    if ("user" in vars(asset)) and asset.user != asset.username:
+        print(asset.user, asset.username)
+
+for asset in rmm_assets_basic:
+    if asset.type.lower() == "mobile_device":
+        print(vars(asset))
