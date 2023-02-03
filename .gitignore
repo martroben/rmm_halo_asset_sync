@@ -3,6 +3,7 @@ halo_rmm_fields.txt
 sample_halo_fields.txt
 sample_rmm_fields.txt
 backup
+random_unfinished.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

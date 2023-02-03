@@ -6,19 +6,20 @@ import os
 import re
 import requests
 # import sys                                  # needed to send log stream to stdout in debug mode
-from time import sleep
-from functools import partial, wraps
 
 # external
 import xml.etree.ElementTree as xml_ET      # xml parser
 from tqdm import tqdm                       # progress bar
 from dotenv import dotenv_values            # loading environmental variables
 
+# local
+import general
 
-class RMM_asset:
+
+class RmmAsset:
     def add_attributes_from_dict(self, parameters: dict) -> None:
         """
-        Adds all items from the input dict to the RMM_asset instance parameters.
+        Adds all items from the input dict to the RmmAsset instance parameters.
         :param parameters: dict with parameter: value pairs.
         """
         for key, value in parameters.items():
@@ -34,41 +35,7 @@ class RMM_asset:
                            "cpu", "disk", "monitor"]
 
 
-def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
-                   exceptions: (Exception, tuple[Exception]) = Exception):
-    """
-    Retries the wrapped function. Meant to be used as a decorator.
-    Optional parameters:
-    times: int - The number of times to repeat the wrapped function (default: 3).
-    exceptions: tuple[Exception] - Tuple of exceptions that trigger a retry attempt (default: Exception).
-    interval_sec: float or a function with no arguments that returns a float
-    How many seconds to wait between retry attempts (default: 8)
-    """
-    if function is None:
-        return partial(retry_function, times=times, interval_sec=interval_sec, exceptions=exceptions)
-
-    @wraps(function)
-    def retry(*args, **kwargs):
-        attempt = 1
-        while attempt <= times:
-            try:
-                successful_result = function(*args, **kwargs)
-            except exceptions as exception:
-                log_string = f"Retrying function {function.__name__} in {round(interval_sec, 2)} seconds, " \
-                             f"because {type(exception).__name__} exception occurred: {exception}\n" \
-                             f"Attempt {attempt} of {times}."
-                logging.exception(log_string)
-                attempt += 1
-                if attempt <= times:
-                    sleep(interval_sec)
-            else:
-                if attempt > 1:
-                    logging.info("Retry successful!")
-                return successful_result
-    return retry
-
-
-@retry_function
+@general.retry_function()
 def api_get_clients() -> requests.Response:
     """
     https://documentation.n-able.com/remote-management/userguide/Content/listing_clients_.htm
@@ -82,7 +49,7 @@ def api_get_clients() -> requests.Response:
     return response
 
 
-@retry_function
+@general.retry_function()
 def api_get_assets_at_client(client_id: (str, int), asset_type: str) -> requests.Response:
     """
     Queries the RMM API list_devices_at_client endpoint and returns the response
@@ -161,7 +128,7 @@ def parse_hardware_type(type_id: str) -> str:
     return f"unknown hardware id: {type_id}"
 
 
-@retry_function
+@general.retry_function()
 def api_get_asset_details(device_id: (str, int)) -> requests.Response:
     """
     Queries the RMM API list_device_asset_details endpoint and returns the response.
@@ -331,7 +298,7 @@ def parse_asset_details(details_xml: xml_ET.Element) -> dict:
     # Give informative error if parsing of some field fails.
     except Exception as exception:
         parsed_fields = details.keys()
-        non_parsed_fields = [field for field in RMM_asset.standard_attributes if field not in parsed_fields]
+        non_parsed_fields = [field for field in RmmAsset.standard_attributes if field not in parsed_fields]
         warning_string = f"{type(exception).__name__} occurred: {exception}.\n" \
                          f"Parsing of the following fields succeeded: {', '.join(parsed_fields)}.\n" \
                          f"The problem could be in one of these fields: {', '.join(non_parsed_fields)}"
@@ -358,18 +325,22 @@ logging.basicConfig(
     level=logging.getLevelName(LOG_LEVEL))
 
 
-################################
-# Load environmental variables #
-################################
+###########################################
+# Import environmental / config variables #
+###########################################
 
 env_file_path = ".env"
-# dotenv_values just reads from file without assigning variables to environment.
-# use load_dotenv for the "real thing"
-env_variables = dotenv_values(env_file_path)
-RMM_BASE_URL = env_variables["RMM_BASE_URL"]
-RMM_API_KEY = env_variables["RMM_API_KEY"]
-RMM_ASSET_TYPES = json.loads(env_variables["RMM_ASSET_TYPES"])
-RMM_ASSETS_AT_CLIENT_FIELDS = json.loads(env_variables["RMM_ASSETS_AT_CLIENT_FIELDS"])
+ini_file_path = ".ini"
+
+general.parse_input_file(
+    env_file_path,
+    parse_values=False,
+    set_environmental_variables=True)
+
+ini_parameters = general.parse_input_file(ini_file_path)
+
+RMM_BASE_URL = os.environ["RMM_BASE_URL"]
+RMM_API_KEY = os.environ["RMM_API_KEY"]
 
 
 ###########
@@ -388,7 +359,7 @@ for client in response_xml.findall("./items/client"):
 # Query API for a list of devices under each Client
 client_assets = list()
 for client, client_id in clients.items():
-    for asset_type in RMM_ASSET_TYPES:
+    for asset_type in ini_parameters["RMM_ASSET_TYPES"]:
         client_asset_response = api_get_assets_at_client(client_id=client_id, asset_type=asset_type)
         logging.debug(f"\n\nGet assets at client API request response for client {client} asset type {asset_type}:")
         logging.debug(client_asset_response.text)
@@ -417,13 +388,13 @@ rmm_assets_basic = list()
 for site_asset in site_assets:
     client, client_id, site, site_id, asset_type, site_xml = site_asset.values()
     for device_xml in site_xml.findall(asset_type):
-        asset = RMM_asset()
+        asset = RmmAsset()
         asset.client = client
         asset.client_id = client_id
         asset.site = site
         asset.site_id = site_id
         asset.type = asset_type
-        device_info = {field: device_xml.find(field).text for field in RMM_ASSETS_AT_CLIENT_FIELDS
+        device_info = {field: device_xml.find(field).text for field in ini_parameters["RMM_ASSETS_AT_CLIENT_FIELDS"]
                        if device_xml.find(field) is not None}
         asset.add_attributes_from_dict(device_info)
         rmm_assets_basic += [asset]
@@ -460,10 +431,10 @@ for element in rmm_asset_details_responses:
             del log_string
     rmm_assets_detailed += [asset]
 
-for asset in rmm_assets_detailed:
-    if ("user" in vars(asset)) and asset.user != asset.username:
-        print(asset.user, asset.username)
-
-for asset in rmm_assets_basic:
-    if asset.type.lower() == "mobile_device":
-        print(vars(asset))
+# for asset in rmm_assets_detailed:
+#     if ("user" in vars(asset)) and asset.user != asset.username:
+#         print(asset.user, asset.username)
+#
+# for asset in rmm_assets_basic:
+#     if asset.type.lower() == "mobile_device":
+#         print(vars(asset))
