@@ -14,28 +14,25 @@ general.parse_input_file(
     parse_values=False,
     set_environmental_variables=True)
 
-HALO_API_AUTHENTICATION_URL = os.environ["HALO_API_AUTHENTICATION_URL"]
-HALO_API_TENANT = os.environ["HALO_API_TENANT"]
-HALO_API_CLIENT_ID = os.environ["HALO_API_CLIENT_ID"]
-HALO_API_CLIENT_SECRET = os.environ["HALO_API_CLIENT_SECRET"]
 
-
-def get_halo_token(scope: str) -> dict[str]:
+def get_halo_token(scope: str, url: str, tenant: str, client_id: str, secret: str) -> dict[str]:
     """
     Get authentication token for Halo API.
-    Required environmental variables: HALO_API_AUTHENTICATION_URL, HALO_API_TENANT,
-    HALO_API_CLIENT_ID, HALO_API_CLIENT_SECRET
 
+    :param url: Halo authorization api url
+    :param tenant: Halo tenant
+    :param client_id: Halo API client ID
+    :param secret: Halo API client secret
     :param scope: Scope of the access (only accepts one scope at a time).
     :return: Json dict with keys and values from the authentication response.
     """
     parameters = {
-        "tenant": HALO_API_TENANT}
+        "tenant": tenant}
 
     authentication_body = {
         "grant_type": "client_credentials",
-        "client_id": HALO_API_CLIENT_ID,
-        "client_secret": HALO_API_CLIENT_SECRET,
+        "client_id": client_id,
+        "client_secret": secret,
         "scope": scope}
 
     n_retries = 3
@@ -44,7 +41,7 @@ def get_halo_token(scope: str) -> dict[str]:
     for attempt in range(n_retries):
         try:
             authentication_response = requests.post(
-                url=HALO_API_AUTHENTICATION_URL,
+                url=url,
                 data=authentication_body,
                 params=parameters)
             if authentication_response.status_code != 200:
