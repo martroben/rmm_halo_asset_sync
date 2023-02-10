@@ -106,7 +106,7 @@ asset_type_response = requests.get(
 asset_types = asset_type_response.json()
 
 existing_asset_types = [asset_type["name"].lower().strip() for asset_type in asset_types]
-expected_asset_types = [asset_type.lower() for asset_type in ini_parameters["HALO_REQUIRED_ASSET_TYPES"]]
+expected_asset_types = [asset_type.lower() for asset_type in ini_parameters["RMM_HALO_ASSET_MAP"].values()]
 missing_asset_types = [asset_type for asset_type in expected_asset_types
                        if asset_type not in existing_asset_types]
 
@@ -182,15 +182,14 @@ del log_string
 # Check asset fields #
 ######################
 
-existing_expected_asset_types = [asset_type for asset_type in expected_asset_types
-                                 if asset_type not in missing_asset_types]
-
 log_string = f"{'-'*100}\nChecking if Halo Asset types have the recommended Fields..."
 print(log_string)
 del log_string
 
+relevant_asset_type_names = [asset_type for asset_type in expected_asset_types
+                             if asset_type not in missing_asset_types]
 relevant_asset_types = [asset_type for asset_type in asset_types
-                        if asset_type["name"].lower() in existing_expected_asset_types]
+                        if asset_type["name"].lower() in relevant_asset_type_names]
 
 log_string = str()
 for asset_type in relevant_asset_types:
@@ -203,11 +202,13 @@ for asset_type in relevant_asset_types:
                                                 or asset_field in halo_default_fields)]
 
     if missing_mandatory_asset_fields:
-        log_string += f"Halo Asset type '{asset_type['name']}' has not been assigned the following mandatory Fields:\n" \
+        log_string += f"Halo Asset type '{asset_type['name']}' has not been assigned " \
+                      f"the following mandatory Fields:\n" \
                       f"{', '.join(missing_mandatory_asset_fields)}.\n\n"
 
     if missing_recommended_asset_fields:
-        log_string += f"Halo Asset type '{asset_type['name']}' has not been assigned the following recommended Fields:\n" \
+        log_string += f"Halo Asset type '{asset_type['name']}' has not been assigned " \
+                      f"the following recommended Fields:\n" \
                       f"{', '.join(missing_recommended_asset_fields)}.\n\n"
 
 log_string += f"You can add the Fields to Assets in Configuration > Asset Management > Asset Types > " \
@@ -217,13 +218,39 @@ print(log_string)
 del log_string
 
 
-############################### check recommended key fields
-key_fields = dict()
+################################
+# Check recommended key fields #
+################################
+
+log_string = f"{'-'*100}\nChecking if recommended Key Fields are configured for Halo Asset types..."
+print(log_string)
+del log_string
+
+existing_key_fields = dict()
 for asset_type in relevant_asset_types:
     asset_type_key_fields = [field_value for field_name, field_value in asset_type.items()
                              if re.search(r"keyfield\d_name", field_name)]
-    key_fields[asset_type["name"]] = asset_type_key_fields
+    existing_key_fields[asset_type["name"].lower()] = asset_type_key_fields
 
+recommended_key_fields = ini_parameters["RECOMMENDED_KEY_FIELDS"]
+missing_key_fields = dict()
+for rmm_asset_type, key_fields in recommended_key_fields.items():
+    halo_asset_type = ini_parameters["RMM_HALO_ASSET_MAP"][rmm_asset_type]
+    key_fields = [key_fields] if not isinstance(key_fields, list) else key_fields
+    missing = [field for field in key_fields if field not in existing_key_fields[halo_asset_type.lower()]]
+    if missing:
+        missing_key_fields[halo_asset_type] = missing
+
+log_string = str()
+for asset_type, fields in missing_key_fields.items():
+    log_string += f"Halo Asset type '{asset_type}' doesn't have the following Fields configured as Key Fields:\n" \
+                  f"{' '.join(fields)}.\n\n"
+
+log_string += f"You can configure Key Fields for Assets in Configuration > Asset Management > Asset Types > " \
+              f"[asset type name] > Field List.\n"
+
+print(log_string)
+del log_string
 
 log_string = f"{'  END HALO SETUP CHECK  '  :-^100}"
 print(log_string)
