@@ -54,6 +54,7 @@ log_string = f"{'  START HALO SETUP CHECK  '  :-^100}"
 print(log_string)
 del log_string
 
+
 ###########################################
 # Import environmental / config variables #
 ###########################################
