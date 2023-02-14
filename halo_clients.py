@@ -62,6 +62,43 @@ read_client_token = get_halo_token(
     secret=os.environ["HALO_API_CLIENT_SECRET"])
 
 
+#################
+# Get toplevels #
+#################
+
+api_toplevel_url = HALO_API_URL.strip("/") + "/" + ini_parameters["HALO_TOPLEVEL_ENDPOINT"]
+read_toplevel_headers = {"Authorization": f"{read_client_token['token_type']} {read_client_token['access_token']}"}
+read_toplevel_parameters = {
+    "includeinactive": False}
+
+read_toplevel_response = requests.get(
+    url=api_toplevel_url,
+    headers=read_toplevel_headers,
+    params=read_toplevel_parameters)
+toplevel_data = read_toplevel_response.json()
+
+toplevels = [{"id": toplevel["id"], "name": toplevel["name"]} for toplevel in toplevel_data["tree"]]
+nsight_toplevel = str(ini_parameters.get("NSIGHT_NEW_CLIENTS_TOPLEVEL", "")).strip()
+
+
+################## Move to check setup
+if nsight_toplevel:
+    nsight_toplevel_verified = str()
+    for toplevel in toplevels:
+        if nsight_toplevel in [toplevel["id"], toplevel["name"]]:
+            nsight_toplevel_verified = toplevel
+    if not nsight_toplevel_verified:
+        existing_toplevels = [f'{toplevel["name"]} (id: {toplevel["id"]})' for toplevel in toplevels]
+        log_string = f"The toplevel given for N-sight clients in input parameters: '{nsight_toplevel}', " \
+                     f"does not exist in Halo toplevels: {', '.join(existing_toplevels)}"
+        print(log_string)
+        del log_string
+else:
+    log_string = "No toplevel defined for N-sight clients. Using default toplevel."
+    print(log_string)
+    del log_string
+
+
 ###############
 # Get clients #
 ###############
@@ -75,9 +112,9 @@ read_client_response = requests.get(
     url=api_client_url,
     headers=read_client_headers,
     params=read_client_parameters)
-read_client_data = read_client_response.json()
+client_data = read_client_response.json()
 
-clients = [{"id": client["id"], "name": client["name"]} for client in read_client_data["clients"]]
+clients = [{"id": client["id"], "name": client["name"]} for client in client_data["clients"]]
 
 
 ################
@@ -93,12 +130,14 @@ edit_client_token = get_halo_token(
 
 edit_client_headers = {"Authorization": f"{edit_client_token['token_type']} {edit_client_token['access_token']}"}
 edit_client_parameters = {}
-edit_client_body = {
-    "name": "API_customer"}
+edit_client_payload = [{
+    "name": "API_customer"
+    #"toplevel_id": 12
+}]
 
 edit_client_response = requests.post(
     url=api_client_url,
-    json=json.dumps(edit_client_body),
+    json=edit_client_payload,
     headers=edit_client_headers,
     params=edit_client_parameters)
 
