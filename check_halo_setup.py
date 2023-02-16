@@ -50,7 +50,7 @@ logging.basicConfig(
     style="{",
     level=logging.getLevelName(LOG_LEVEL))
 
-log_string = f"{'  START HALO SETUP CHECK  '  :-^100}"
+log_string = f"{'  HALO SETUP CHECK START  '  :-^100}"
 print(log_string)
 del log_string
 
@@ -75,12 +75,13 @@ HALO_API_URL = os.environ["HALO_API_URL"]
 # Get read assets authorization #
 #################################
 
-log_string = f"\nGetting authorization token..."
+read_assets_scope = "read:assets"
+log_string = f"\nGetting authorization token for {read_assets_scope}..."
 print(log_string)
 del log_string
 
 read_assets_token = get_halo_token(
-    scope="read:assets",
+    scope=read_assets_scope,
     url=os.environ["HALO_API_AUTHENTICATION_URL"],
     tenant=os.environ["HALO_API_TENANT"],
     client_id=os.environ["HALO_API_CLIENT_ID"],
@@ -116,9 +117,9 @@ if missing_asset_types:
                  f"You should add them in Configuration > Asset Management > Asset Type.\n" \
                  f"- If these asset types are not added, the script will not work.\n"
 else:
-    log_string = f"Checked if Halo environment has the following required Asset types:\n" \
+    log_string = f"Checked if Halo environment has the following required Asset types: " \
                  f"{', '.join(expected_asset_types)}.\n" \
-                 f"- All required Asset types are present."
+                 f"- All required Asset types are present. All good, carry on."
 
 print(log_string)
 del log_string
@@ -160,20 +161,20 @@ log_string = str()
 if missing_mandatory_fields or missing_recommended_fields:
     if missing_mandatory_fields:
         log_string += f"Missing the following mandatory Fields:\n" \
-                      f"{', '.join(missing_mandatory_fields)}.\n" \
-                      f"- If these fields are not added, the script will not run.\n\n"
+                      f"{', '.join(missing_mandatory_fields)}.\n\n"
 
     if missing_recommended_fields:
         log_string += f"Missing the following recommended Fields:\n" \
-                      f"{', '.join(missing_recommended_fields)}.\n" \
-                      f"- If these fields are not added, they will not be synced from RMM.\n\n"
+                      f"{', '.join(missing_recommended_fields)}.\n\n"
 
-    log_string += f"You can add the Fields in Configuration > Asset Management > Asset Fields."
+    log_string += f"You can add the Fields in Configuration > Asset Management > Asset Fields.\n" \
+                  f"If mandatory Fields are not added, the script will not run. " \
+                  f"If recommended Fields are not added, these Fields will not be synced."
 
 else:
     log_string += f"Checked if the following Fields are defined in Halo environment:\n" \
                   f"{', '.join(itertools.chain(expected_mandatory_fields, expected_recommended_fields))}.\n" \
-                  f"- All required Fields are present."
+                  f"- All required Fields are present. All good, carry on."
 
 print(log_string)
 del log_string
@@ -183,7 +184,7 @@ del log_string
 # Check asset fields #
 ######################
 
-log_string = f"{'-'*100}\nChecking if Halo Asset types have the recommended Fields..."
+log_string = f"{'-'*100}\nChecking if Halo Asset types have the required Fields..."
 print(log_string)
 del log_string
 
@@ -193,6 +194,7 @@ relevant_asset_types = [asset_type for asset_type in asset_types
                         if asset_type["name"].lower() in relevant_asset_type_names]
 
 log_string = str()
+missing_fields_found = False
 for asset_type in relevant_asset_types:
     existing_asset_fields = [asset_field.lower() for asset_field in get_halo_asset_fields(asset_type)]
     missing_mandatory_asset_fields = [asset_field for asset_field in expected_mandatory_fields
@@ -203,17 +205,25 @@ for asset_type in relevant_asset_types:
                                                 or asset_field in halo_default_fields)]
 
     if missing_mandatory_asset_fields:
+        missing_fields_found = True
         log_string += f"Halo Asset type '{asset_type['name']}' has not been assigned " \
                       f"the following mandatory Fields:\n" \
                       f"{', '.join(missing_mandatory_asset_fields)}.\n\n"
 
     if missing_recommended_asset_fields:
+        missing_fields_found = True
         log_string += f"Halo Asset type '{asset_type['name']}' has not been assigned " \
                       f"the following recommended Fields:\n" \
                       f"{', '.join(missing_recommended_asset_fields)}.\n\n"
 
-log_string += f"You can add the Fields to Assets in Configuration > Asset Management > Asset Types > " \
-              f"[asset type name] > Field List.\n"
+if missing_fields_found:
+    log_string += f"You can add the Fields to Assets in Configuration > Asset Management > Asset Types > " \
+                  f"[asset type name] > Field List.\n" \
+                  f"If mandatory Fields are not added, the script will not run. " \
+                  f"If recommended Fields are not added, these Fields will not be synced."
+else:
+    log_string += f"- Verified that Asset types {', '.join(relevant_asset_type_names)} have the required Fields. " \
+                  f"All good, carry on."
 
 print(log_string)
 del log_string
@@ -243,20 +253,77 @@ for rmm_asset_type, key_fields in recommended_key_fields.items():
         missing_key_fields[halo_asset_type] = missing
 
 log_string = str()
-for asset_type, fields in missing_key_fields.items():
-    log_string += f"Halo Asset type '{asset_type}' doesn't have the following Fields configured as Key Fields:\n" \
-                  f"{' '.join(fields)}.\n\n"
-
-log_string += f"You can configure Key Fields for Assets in Configuration > Asset Management > Asset Types > " \
-              f"[asset type name] > Field List.\n"
+if missing_key_fields:
+    for asset_type, fields in missing_key_fields.items():
+        log_string += f"Halo Asset type '{asset_type}' doesn't have the following Fields configured as Key Fields:\n" \
+                      f"{' '.join(fields)}.\n\n"
+    log_string += f"You can configure Key Fields for Assets in Configuration > Asset Management > Asset Types > " \
+                  f"[asset type name] > Field List.\n" \
+                  f"Even if Key Fields are not configured, the script will still work."
+else:
+    log_string = f"- Verified that Key Fields are correctly configured for Asset types " \
+                 f"{', '.join(relevant_asset_type_names)}. All good, carry on."
 
 print(log_string)
 del log_string
 
-log_string = f"{'  END HALO SETUP CHECK  '  :-^100}"
+
+#############################
+# Check if Top Level exists #
+#############################
+
+nsight_toplevel = str(ini_parameters.get("HALO_NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
+
+if nsight_toplevel:
+    log_string = f"{'-'*100}\nChecking if Halo has Top Level '{nsight_toplevel}' for N-sight clients..."
+    print(log_string)
+    del log_string
+
+    read_customers_scope = "read:customers"
+    log_string = f"\nGetting authorization token for {read_customers_scope}..."
+    print(log_string)
+    del log_string
+
+    read_client_token = get_halo_token(
+        scope=read_customers_scope,
+        url=os.environ["HALO_API_AUTHENTICATION_URL"],
+        tenant=os.environ["HALO_API_TENANT"],
+        client_id=os.environ["HALO_API_CLIENT_ID"],
+        secret=os.environ["HALO_API_CLIENT_SECRET"])
+
+    api_toplevel_url = HALO_API_URL.strip("/") + "/" + ini_parameters["HALO_TOPLEVEL_ENDPOINT"]
+    read_toplevel_headers = {"Authorization": f"{read_client_token['token_type']} {read_client_token['access_token']}"}
+    read_toplevel_parameters = {
+        "includeinactive": False}
+
+    read_toplevel_response = requests.get(
+        url=api_toplevel_url,
+        headers=read_toplevel_headers,
+        params=read_toplevel_parameters)
+    toplevel_data = read_toplevel_response.json()
+
+    toplevels = [{"id": toplevel["id"], "name": toplevel["name"]} for toplevel in toplevel_data["tree"]]
+
+    nsight_toplevel_verified = str()
+    for toplevel in toplevels:
+        if nsight_toplevel in [toplevel["id"], toplevel["name"]]:
+            nsight_toplevel_verified = toplevel
+    if not nsight_toplevel_verified:
+        existing_toplevels = [f'{toplevel["name"]} (id: {toplevel["id"]})' for toplevel in toplevels]
+        log_string = f"The Top Level for N-sight clients '{nsight_toplevel}' does not exist in Halo Top Levels.\n" \
+                     f"Existing Top Levels are {', '.join(existing_toplevels)}.\n" \
+                     f"You can add the Top Level in Customers > New > +New Top Level.\n" \
+                     f"In addition, make sure Top Levels are enabled in " \
+                     f"Configuration > Users > General Settings >" \
+                     f" Show an additional level ('Top Level') for grouping Customers.\n" \
+                     f"If the Top Level is not added then N-sight clients will be assigned to random Top Level in Halo."
+    else:
+        log_string = f"- Verified that Top Level '{nsight_toplevel}' exists. All good, carry on."
+    print(log_string)
+    del log_string
+
+
+log_string = f"{'  HALO SETUP CHECK END  '  :-^100}"
 print(log_string)
 del log_string
-
-
-###################### Check toplevels
 
