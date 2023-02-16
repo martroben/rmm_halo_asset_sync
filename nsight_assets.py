@@ -36,17 +36,25 @@ class RmmAsset:
 
 
 @general.retry_function()
-def api_get_clients() -> requests.Response:
+def get_clients(url, api_key) -> requests.Response:
     """
     https://documentation.n-able.com/remote-management/userguide/Content/listing_clients_.htm
     Queries the RMM API list_clients endpoint and returns the response.
     :return: requests.Response object
     """
     parameters = {
-        "apikey": RMM_API_KEY,
+        "apikey": api_key,
         "service": "list_clients"}
-    response = requests.get(RMM_BASE_URL, params=parameters)
+    response = requests.get(url, params=parameters)
     return response
+
+
+def parse_clients(api_response: requests.Response) -> dict:
+    response_xml = xml_ET.fromstring(api_response.text)
+    clients = dict()
+    for client in response_xml.findall("./items/client"):
+        clients[client.find("./name").text] = client.find("./clientid").text
+    return clients
 
 
 @general.retry_function()
@@ -59,12 +67,12 @@ def api_get_assets_at_client(client_id: (str, int), asset_type: str) -> requests
     :return: requests.Response object
     """
     request_parameters = {
-        "apikey": RMM_API_KEY,
+        "apikey": NSIGHT_API_KEY,
         "service": "list_devices_at_client",
         "clientid": client_id,
         "devicetype": asset_type}
 
-    response = requests.get(RMM_BASE_URL, params=request_parameters)
+    response = requests.get(NSIGHT_BASE_URL, params=request_parameters)
     if not response.ok:
         error_string = f"Got status code {response.status_code} while connecting to {response.url}. " \
                        f"Reason: {response.reason}"
@@ -137,11 +145,11 @@ def api_get_asset_details(device_id: (str, int)) -> requests.Response:
     :return: requests.Response object.
     """
     request_parameters = {
-        "apikey": RMM_API_KEY,
+        "apikey": NSIGHT_API_KEY,
         "service": "list_device_asset_details",
         "deviceid": device_id}
 
-    response = requests.get(RMM_BASE_URL, params=request_parameters)
+    response = requests.get(NSIGHT_BASE_URL, params=request_parameters)
     if not response.ok:
         error_string = f"Got status code {response.status_code} while connecting to {response.url}. " \
                        f"Reason: {response.reason}"
@@ -339,8 +347,8 @@ general.parse_input_file(
 
 ini_parameters = general.parse_input_file(ini_file_path)
 
-RMM_BASE_URL = os.environ["RMM_BASE_URL"]
-RMM_API_KEY = os.environ["RMM_API_KEY"]
+NSIGHT_BASE_URL = os.environ["NSIGHT_BASE_URL"]
+NSIGHT_API_KEY = os.environ["NSIGHT_API_KEY"]
 
 
 ###########
@@ -348,18 +356,15 @@ RMM_API_KEY = os.environ["RMM_API_KEY"]
 ###########
 
 # Query API for a list of Clients
-clients_response = api_get_clients()
+clients_response = get_clients(NSIGHT_BASE_URL, NSIGHT_API_KEY)
 logging.debug("\n\nClient list API request response:")
 logging.debug(clients_response.text)
-response_xml = xml_ET.fromstring(clients_response.text)
-clients = dict()
-for client in response_xml.findall("./items/client"):
-    clients[client.find("./name").text] = client.find("./clientid").text
+clients = parse_clients(clients_response)
 
 # Query API for a list of devices under each Client
 client_assets = list()
 for client, client_id in clients.items():
-    for asset_type in ini_parameters["RMM_ASSET_TYPES"]:
+    for asset_type in ini_parameters["NSIGHT_ASSET_TYPES"]:
         client_asset_response = api_get_assets_at_client(client_id=client_id, asset_type=asset_type)
         logging.debug(f"\n\nGet assets at client API request response for client {client} asset type {asset_type}:")
         logging.debug(client_asset_response.text)
