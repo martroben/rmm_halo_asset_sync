@@ -1,7 +1,8 @@
 
 # standard
-import json
 from functools import partial, wraps
+import json
+import logging
 import os
 import re
 from time import sleep
@@ -11,6 +12,7 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
                    exceptions: (Exception, tuple[Exception]) = Exception):
     """
     Retries the wrapped function. Meant to be used as a decorator.
+    Parses the parameter 'log_name' from inner function and uses the logger with that name.
     Optional parameters:
     times: int - The number of times to repeat the wrapped function (default: 3).
     exceptions: tuple[Exception] - Tuple of exceptions that trigger a retry attempt (default: Exception).
@@ -23,6 +25,9 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
     @wraps(function)
     def retry(*args, **kwargs):
         attempt = 1
+        # Get log name from wrapped function. Use root if no log name.
+        log_name = {**kwargs}.get("log_name", "root")
+        logger = logging.getLogger(log_name)
         while attempt <= times:
             try:
                 successful_result = function(*args, **kwargs)
@@ -30,13 +35,13 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
                 log_string = f"Retrying function {function.__name__} in {round(interval_sec, 2)} seconds, " \
                              f"because {type(exception).__name__} exception occurred: {exception}\n" \
                              f"Attempt {attempt} of {times}."
-                logging.exception(log_string)
+                logger.info(log_string)
                 attempt += 1
                 if attempt <= times:
                     sleep(interval_sec)
             else:
                 if attempt > 1:
-                    logging.info("Retry successful!")
+                    logger.info("Retry successful!")
                 return successful_result
     return retry
 
