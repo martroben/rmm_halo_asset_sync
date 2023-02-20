@@ -25,9 +25,8 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
     @wraps(function)
     def retry(*args, **kwargs):
         attempt = 1
-        # Get log name from wrapped function. Use root if no log name.
-        log_name = {**kwargs}.get("log_name", "root")
-        logger = logging.getLogger(log_name)
+        log_name = {**kwargs}.get("log_name", "root")         # Get log name from wrapped function.
+        logger = logging.getLogger(log_name)                  # Use root if no log name.
         while attempt <= times:
             try:
                 successful_result = function(*args, **kwargs)

@@ -24,7 +24,7 @@ def get_clients(url, api_key, **kwargs) -> requests.Response:
 def parse_clients(api_response: requests.Response) -> list:
     response_xml = xml_ET.fromstring(api_response.text)
     clients = [{"id": client.find("./clientid").text, "name": client.find("./name").text} for
-                client in response_xml.findall("./items/client")]
+               client in response_xml.findall("./items/client")]
 
     return clients
 
