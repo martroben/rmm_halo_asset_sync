@@ -3,7 +3,7 @@
 import json
 import logging
 import os
-import requests
+import sqlite3
 # external
 import xml.etree.ElementTree as xml_ET      # xml parser
 # local
@@ -11,6 +11,7 @@ from authenticate import get_halo_token
 import general
 import halo_requests
 import nsight_requests
+import sql_operations
 
 
 ##################
@@ -84,6 +85,8 @@ env_parameters = {
 ###############
 # Set logging #
 ###############
+
+session_id = general.generate_random_hex(8)
 
 # os.environ["LOG_DIR_PATH"] = "."
 # os.environ["LOG_LEVEL"] = "INFO"
@@ -187,9 +190,9 @@ edit_client_token = get_halo_token(
     client_id=os.environ["HALO_API_CLIENT_ID"],
     secret=os.environ["HALO_API_CLIENT_SECRET"])
 
-logger.debug(f"(DRYRUN) Found N-sight Clients that are not synced to Halo: {len(missing_clients)}")
+logger.debug(f"{DRYRUN*'(DRYRUN) '}Found N-sight Clients that are not synced to Halo: {len(missing_clients)}")
 
-with halo_requests.get_session(edit_client_token) as edit_client_session:
+with halo_requests.create_session(edit_client_token) as edit_client_session:
     for client in missing_clients:
         if DRYRUN:
             logger.debug(f"(DRYRUN) Client posted to Halo: {str(client)}")
@@ -210,4 +213,22 @@ with halo_requests.get_session(edit_client_token) as edit_client_session:
 
 
 #################### Create backup_client + rest of the backup logic
+
+
+
+
+
+import sql_operations
+import sqlite3
+
+SQL_DATABASE_PATH = ":memory:"
+sql_connection = sqlite3.connect(SQL_DATABASE_PATH)
+sql_sessions_table = sql_operations.SqlInterfaceSessions(sql_connection)
+sql_sessions_table.read()
+
+update_table_command = f"UPDATE sessions SET ids = 'asdasd';"
+cursor = sql_connection.cursor()
+result = cursor.execute(update_table_command)
+
+
 
