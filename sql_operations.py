@@ -1,20 +1,30 @@
 
 import sqlite3
+from abc import ABC, abstractmethod
 
 
-class SqlInterfaceSessions:
+class SqlInterface(ABC):
 
-    name = "sessions"
-    columns = {
-        "id": "TEXT",
-        "status": "TEXT",
-        "clients_synced": "INTEGER",
-        "sites_synced": "INTEGER",
-        "assets_synced": "INTEGER"}
+    active = 0
 
-    def __init__(self, connection):
+    @property
+    @abstractmethod
+    def name(self):
+        """Name of the SQL table"""
+
+    @property
+    @abstractmethod
+    def columns(self):
+        """Names of columns in the SQL table"""
+
+    def __init__(self, connection, active=1):
         self.connection = connection
-        self.check()
+        if active:
+            self.check()
+            self.active = 1
+        else:
+            self.insert = self.null_function
+            self.update = self.null_function
 
     def check(self) -> None:
         if not table_exists(self.name, self.connection):
@@ -47,9 +57,38 @@ class SqlInterfaceSessions:
             connection=self.connection,
             where=where)
 
-    def info(self):
-        # columns, types, nrow
+    def info(self) -> dict:
+        if not self.active:
+            return {"active": 0}
+        result = get_table_info(
+            table=self.name,
+            connection=self.connection)
+        result["active"] = 1
+        return result
+
+    def null_function(self, *args, **kwargs):
         pass
+
+
+class SqlTableSessions(SqlInterface):
+
+    name = "sessions"
+    columns = {
+        "id": "TEXT",
+        "time_unix": "INTEGER",
+        "status": "TEXT",
+        "clients_synced": "INTEGER",
+        "sites_synced": "INTEGER",
+        "assets_synced": "INTEGER"}
+
+
+class SqlTableBackup(SqlInterface):
+
+    name = "backup"
+    columns = {
+        "id": "TEXT",
+        "action": "TEXT",
+        "data": "TEXT"}
 
 
 def table_exists(table: str, connection: sqlite3.Connection) -> bool:
@@ -112,8 +151,15 @@ def insert_row(data: dict, table: str, connection: sqlite3.Connection) -> None:
     :param connection: SQL connection object.
     :return: None
     """
-    insert_data_command = f"INSERT INTO {table} ({','.join(data.keys())})\n" + \
-                          f"VALUES\n\t({','.join(data.values())});"
+    column_names = list()
+    values = list()
+    for column_name, value in data.items():
+        column_names += [column_name]
+        values += [f'"{value}"' if isinstance(value, str) else str(value)]       # Add quotes to string variables
+    column_names_string = ",".join(column_names)
+    values_string = ",".join(values)
+    insert_data_command = f"INSERT INTO {table} ({column_names_string})\n" \
+                          f"VALUES\n\t({values_string});"
     sql_cursor = connection.cursor()
     sql_cursor.execute(insert_data_command)
     connection.commit()
@@ -137,4 +183,20 @@ def update_row(column: str, value: str, table: str,
     sql_cursor.execute(update_table_command)
     connection.commit()
     return
+
+def get_table_info(table: str, connection: sqlite3.Connection) -> dict:
+    """
+    Get dict with basic table info
+    :param table: Table name in SQL database.
+    :param connection: SLQ connection object.
+    :return: Dict with values columns (column  names and types) and n_rows.
+    """
+    get_table_info_command = f"SELECT name, type FROM pragma_table_info('{table}');"
+    get_n_rows_command = f"SELECT COUNT(id) FROM {table};"
+    cursor = connection.cursor()
+    columns_response = cursor.execute(get_table_info_command)
+    columns = [{"name": name, "type": column_type} for name, column_type in columns_response.fetchall()]
+    n_rows_response = cursor.execute(get_n_rows_command)
+    n_rows = n_rows_response.fetchone()[0]
+    return {"columns": columns, "n_rows": n_rows}
 

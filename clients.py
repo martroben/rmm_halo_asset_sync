@@ -1,5 +1,6 @@
 
 # standard
+from datetime import datetime
 import json
 import logging
 import os
@@ -19,7 +20,7 @@ import sql_operations
 ##################
 
 class Client:
-    comparison_variables = ["name", "toplevel"]
+    comparison_variables = ["name"]
 
     def __eq__(self, other):
         matching_fields = [str(self.__getattribute__(variable)).lower() == str(other.__getattribute__(variable)).lower()
@@ -28,13 +29,14 @@ class Client:
 
     def __repr__(self):
         name = self.__getattribute__("name")
-        id = self.__getattribute__("id")
-        return f"{name} (id: {id})"
+        instance_id = self.__getattribute__("toplevel_id") if self.__class__ is HaloToplevel \
+            else self.__getattribute__("client_id")
+        return f"{name} (id: {instance_id})"
 
 
 class NsightClient(Client):
     def __init__(self, client_xml, toplevel_id=""):
-        self.id = client_xml.find("./clientid").text
+        self.client_id = client_xml.find("./clientid").text
         self.name = client_xml.find("./name").text
         self.toplevel_id = toplevel_id
 
@@ -47,15 +49,15 @@ class NsightClient(Client):
 
 class HaloClient(Client):
     def __init__(self, client):
-        self.id = client["id"]
+        self.client_id = client["id"]
         self.name = client["name"]
         self.toplevel_id = client["toplevel_id"]
 
 
 class HaloToplevel(Client):
-    def __init__(self, client):
-        self.id = client["id"]
-        self.name = client["name"]
+    def __init__(self, toplevel):
+        self.toplevel_id = toplevel["id"]
+        self.name = toplevel["name"]
 
 
 ###########################################
@@ -78,7 +80,8 @@ env_parameters = {
     "HALO_API_CLIENT_ID": os.environ["HALO_API_CLIENT_ID"],
     "HALO_API_CLIENT_SECRET": os.environ["HALO_API_CLIENT_SECRET"],
     "NSIGHT_BASE_URL": os.environ["NSIGHT_BASE_URL"],
-    "NSIGHT_API_KEY": os.environ["NSIGHT_API_KEY"]
+    "NSIGHT_API_KEY": os.environ["NSIGHT_API_KEY"],
+    "DRYRUN": os.environ["DRYRUN"]
 }
 
 
@@ -114,6 +117,30 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
+#############
+# Setup SQL #
+#############
+
+# Create directories for database if they don't exist
+if ini_parameters["SQL_DATABASE_PATH"] != ":memory:":
+    if not os.path.exists(os.path.dirname(ini_parameters["SQL_DATABASE_PATH"])):
+        os.makedirs(os.path.dirname(ini_parameters["SQL_DATABASE_PATH"]))
+
+# Use in-memory SQL for dry-run
+sql_database_path = ":memory:" if env_parameters["DRYRUN"] else ini_parameters["SQL_DATABASE_PATH"]
+
+sql_connection = sqlite3.connect(sql_database_path)
+sql_sessions_table = sql_operations.SqlTableSessions(sql_connection)
+sql_backup_table = sql_operations.SqlTableBackup(sql_connection, active=ini_parameters["BACKUP_ACTIVE"])
+
+# Insert session info to SQL
+sql_session = {
+    "id": session_id,
+    "time_unix": datetime.now().timestamp(),
+    "status": "started"}
+sql_sessions_table.insert(sql_session)
+
+
 ##################################
 # Get read clients authorization #
 ##################################
@@ -142,7 +169,7 @@ nsight_clients = [NsightClient(client) for client in nsight_clients_raw]
 # Set toplevel id for N-sight clients if toplevel name is provided in .ini, and it exists in Halo
 nsight_toplevel = str(ini_parameters.get("HALO_NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
 if nsight_toplevel:
-
+    Client.comparison_variables += ["toplevel_id"]
     toplevel_response = halo_requests.get_clients(
         url=env_parameters["HALO_API_URL"],
         endpoint=ini_parameters["HALO_TOPLEVEL_ENDPOINT"],
@@ -151,7 +178,7 @@ if nsight_toplevel:
     toplevels_raw = toplevel_response.json()["tree"]
     toplevels = [HaloToplevel(toplevel) for toplevel in toplevels_raw]
 
-    nsight_toplevel_ids = [toplevel.id for toplevel in toplevels if toplevel.name == nsight_toplevel]
+    nsight_toplevel_ids = [toplevel.toplevel_id for toplevel in toplevels if toplevel.name == nsight_toplevel]
     if nsight_toplevel_ids:
         for client in nsight_clients:
             client.toplevel_id = nsight_toplevel_ids[0]
@@ -177,10 +204,9 @@ missing_clients = [client for client in nsight_clients if client not in halo_cli
 # Post missing clients #
 ########################
 
-DRYRUN = 1
-
 if not missing_clients:
     exit(0)
+
 
 # Get edit:customers token
 edit_client_token = get_halo_token(
@@ -190,11 +216,12 @@ edit_client_token = get_halo_token(
     client_id=os.environ["HALO_API_CLIENT_ID"],
     secret=os.environ["HALO_API_CLIENT_SECRET"])
 
-logger.debug(f"{DRYRUN*'(DRYRUN) '}Found N-sight Clients that are not synced to Halo: {len(missing_clients)}")
+logger.debug(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Found N-sight Clients that are not synced to Halo: " 
+             "{len(missing_clients)}")
 
 with halo_requests.create_session(edit_client_token) as edit_client_session:
     for client in missing_clients:
-        if DRYRUN:
+        if env_parameters["DRYRUN"]:
             logger.debug(f"(DRYRUN) Client posted to Halo: {str(client)}")
         else:
             halo_requests.post_client(
@@ -204,7 +231,7 @@ with halo_requests.create_session(edit_client_token) as edit_client_session:
                 payload=client.json_payload(),
                 log_name="halo_clients")
 
-        if DRYRUN:
+        if env_parameters["DRYRUN"]:
             # backup_client(client, "new", DRYRUN)
             logger.debug(f"(DRYRUN) Client backed up: {str(client)}")
         else:
@@ -217,18 +244,6 @@ with halo_requests.create_session(edit_client_token) as edit_client_session:
 
 
 
-
-import sql_operations
-import sqlite3
-
-SQL_DATABASE_PATH = ":memory:"
-sql_connection = sqlite3.connect(SQL_DATABASE_PATH)
-sql_sessions_table = sql_operations.SqlInterfaceSessions(sql_connection)
-sql_sessions_table.read()
-
-update_table_command = f"UPDATE sessions SET ids = 'asdasd';"
-cursor = sql_connection.cursor()
-result = cursor.execute(update_table_command)
 
 
 
