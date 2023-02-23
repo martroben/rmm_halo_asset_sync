@@ -8,7 +8,6 @@ import sqlite3
 # external
 import xml.etree.ElementTree as xml_ET      # xml parser
 # local
-from authenticate import get_halo_token
 import general
 import halo_requests
 import nsight_requests
@@ -81,7 +80,7 @@ env_parameters = {
     "HALO_API_CLIENT_SECRET": os.environ["HALO_API_CLIENT_SECRET"],
     "NSIGHT_BASE_URL": os.environ["NSIGHT_BASE_URL"],
     "NSIGHT_API_KEY": os.environ["NSIGHT_API_KEY"],
-    "DRYRUN": os.environ["DRYRUN"]
+    "DRYRUN": int(os.environ["DRYRUN"])
 }
 
 
@@ -91,22 +90,8 @@ env_parameters = {
 
 session_id = general.generate_random_hex(8)
 
-# os.environ["LOG_DIR_PATH"] = "."
-# os.environ["LOG_LEVEL"] = "INFO"
-
-# LOG_DIR_PATH = os.environ["LOG_DIR_PATH"]
-# LOG_LEVEL = os.environ["LOG_LEVEL"].upper()
-# if not os.path.exists(LOG_DIR_PATH):
-#     os.makedirs(LOG_DIR_PATH)
-
-# logging.basicConfig(
-#     # stream=sys.stdout,    # Show log info in stdout (for debugging).
-#     filename=f"{LOG_DIR_PATH}/{datetime.today().strftime('%Y_%m')}.log",
-#     format="{asctime}|{funcName}|{levelname}: {message}",
-#     style="{",
-#     level=logging.getLevelName(LOG_LEVEL))
-
-logger = logging.getLogger("halo_clients")
+log_name = "clients"
+logger = logging.getLogger(log_name)
 logger.setLevel(ini_parameters["LOG_LEVEL"])
 handler = logging.StreamHandler()
 formatter = logging.Formatter(
@@ -134,23 +119,23 @@ sql_sessions_table = sql_operations.SqlTableSessions(sql_connection)
 sql_backup_table = sql_operations.SqlTableBackup(sql_connection, active=ini_parameters["BACKUP_ACTIVE"])
 
 # Insert session info to SQL
-sql_session = {
-    "id": session_id,
-    "time_unix": datetime.now().timestamp(),
-    "status": "started"}
-sql_sessions_table.insert(sql_session)
+sql_sessions_table.insert(
+    id=session_id,
+    time_unix=int(datetime.now().timestamp()),
+    status="started")
 
 
-##################################
-# Get read clients authorization #
-##################################
+##################
+# Get Halo token #
+##################
 
-read_client_token = get_halo_token(
-    scope="read:customers",
+halo_authorizer = halo_requests.HaloAuthorizer(
     url=env_parameters["HALO_API_AUTHENTICATION_URL"],
     tenant=env_parameters["HALO_API_TENANT"],
     client_id=env_parameters["HALO_API_CLIENT_ID"],
     secret=env_parameters["HALO_API_CLIENT_SECRET"])
+
+halo_client_token = halo_authorizer.get_token("edit:customers", log_name=log_name)
 
 
 ###############
@@ -161,7 +146,7 @@ read_client_token = get_halo_token(
 nsight_clients_response = nsight_requests.get_clients(
     url=env_parameters["NSIGHT_BASE_URL"],
     api_key=env_parameters["NSIGHT_API_KEY"],
-    log_name="halo_clients")
+    log_name=log_name)
 
 nsight_clients_raw = xml_ET.fromstring(nsight_clients_response.text).findall("./items/client")
 nsight_clients = [NsightClient(client) for client in nsight_clients_raw]
@@ -173,7 +158,7 @@ if nsight_toplevel:
     toplevel_response = halo_requests.get_clients(
         url=env_parameters["HALO_API_URL"],
         endpoint=ini_parameters["HALO_TOPLEVEL_ENDPOINT"],
-        token=read_client_token)
+        token=halo_client_token)
 
     toplevels_raw = toplevel_response.json()["tree"]
     toplevels = [HaloToplevel(toplevel) for toplevel in toplevels_raw]
@@ -187,7 +172,7 @@ if nsight_toplevel:
 halo_clients_response = halo_requests.get_clients(
     url=env_parameters["HALO_API_URL"],
     endpoint=ini_parameters["HALO_CLIENT_ENDPOINT"],
-    token=read_client_token)
+    token=halo_client_token)
 
 halo_clients_raw = halo_clients_response.json()["clients"]
 halo_clients = [HaloClient(client) for client in halo_clients_raw]
@@ -207,43 +192,33 @@ missing_clients = [client for client in nsight_clients if client not in halo_cli
 if not missing_clients:
     exit(0)
 
-
-# Get edit:customers token
-edit_client_token = get_halo_token(
-    scope="edit:customers",
-    url=os.environ["HALO_API_AUTHENTICATION_URL"],
-    tenant=os.environ["HALO_API_TENANT"],
-    client_id=os.environ["HALO_API_CLIENT_ID"],
-    secret=os.environ["HALO_API_CLIENT_SECRET"])
-
 logger.debug(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Found N-sight Clients that are not synced to Halo: " 
-             "{len(missing_clients)}")
+             f"{len(missing_clients)}")
 
-with halo_requests.create_session(edit_client_token) as edit_client_session:
+
+with halo_requests.HaloSession(halo_client_token) as halo_session:
     for client in missing_clients:
-        if env_parameters["DRYRUN"]:
-            logger.debug(f"(DRYRUN) Client posted to Halo: {str(client)}")
-        else:
-            halo_requests.post_client(
-                session=edit_client_session,
-                url=env_parameters["HALO_API_URL"],
-                endpoint=ini_parameters["HALO_CLIENT_ENDPOINT"],
-                payload=client.json_payload(),
-                log_name="halo_clients")
+        payload = client.json_payload()
+        logger.debug(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Posting new Client to Halo: {str(client)}")
 
-        if env_parameters["DRYRUN"]:
-            # backup_client(client, "new", DRYRUN)
-            logger.debug(f"(DRYRUN) Client backed up: {str(client)}")
-        else:
-            pass
-            # backup_client(client, "new")
+        halo_requests.post_client(
+            session=halo_session,
+            url=env_parameters["HALO_API_URL"],
+            endpoint=ini_parameters["HALO_CLIENT_ENDPOINT"],
+            payload=payload,
+            log_name=log_name,
+            dryrun=env_parameters["DRYRUN"])
 
+        sql_backup_table.insert(
+            session_id=session_id,
+            action="insert",
+            old="",
+            new=payload)
 
-#################### Create backup_client + rest of the backup logic
-
+        logger.debug(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Client backed up: {str(client)}")
 
 
 
 
-
-
+########################### restore test
+# json.dumps(sql_backup_table.read()[-1])

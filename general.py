@@ -8,29 +8,32 @@ import random
 import re
 from time import sleep
 
+import requests
+
 
 def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
-                   exceptions: (Exception, tuple[Exception]) = Exception):
+                   exceptions: (Exception, tuple[Exception]) = Exception, fatal: bool = False):
     """
     Retries the wrapped function. Meant to be used as a decorator.
     Parses the parameter 'log_name' from inner function and uses the logger with that name.
     Optional parameters:
     times: int - The number of times to repeat the wrapped function (default: 3).
-    exceptions: tuple[Exception] - Tuple of exceptions that trigger a retry attempt (default: Exception).
     interval_sec: float or a function with no arguments that returns a float
+    exceptions: tuple[Exception] - Tuple of exceptions that trigger a retry attempt (default: Exception).
+    fatal: If all retry attempts fail, the last exception is re-raised.
     How many seconds to wait between retry attempts (default: 8)
     """
     if function is None:
-        return partial(retry_function, times=times, interval_sec=interval_sec, exceptions=exceptions)
+        return partial(retry_function, times=times, interval_sec=interval_sec, exceptions=exceptions, fatal=fatal)
 
     @wraps(function)
     def retry(*args, **kwargs):
         attempt = 1
         log_name = {**kwargs}.get("log_name", "root")         # Get log name from wrapped function.
-        logger = logging.getLogger(log_name)                  # Use root if no log name.
+        logger = logging.getLogger(log_name)                  # Use root if no log name provided.
         while attempt <= times:
             try:
-                successful_result = function(*args, **kwargs)
+                response = function(*args, **kwargs)
             except exceptions as exception:
                 log_string = f"Retrying function {function.__name__} in {round(interval_sec, 2)} seconds, " \
                              f"because {type(exception).__name__} exception occurred: {exception}\n" \
@@ -39,10 +42,14 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
                 attempt += 1
                 if attempt <= times:
                     sleep(interval_sec)
+                else:
+                    logger.warning("Retry failed!")
+                    if fatal:
+                        raise exception
             else:
                 if attempt > 1:
                     logger.info("Retry successful!")
-                return successful_result
+                return response
     return retry
 
 

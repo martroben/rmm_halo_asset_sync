@@ -43,11 +43,11 @@ class SqlInterface(ABC):
             where=where)
         return result
 
-    def insert(self, data: dict) -> None:
+    def insert(self, **kwargs) -> None:
         insert_row(
-            data=data,
             table=self.name,
-            connection=self.connection)
+            connection=self.connection,
+            **kwargs)
 
     def update(self, column: str, value: (int, float, str, bool), where: str = "") -> None:
         update_row(
@@ -86,9 +86,23 @@ class SqlTableBackup(SqlInterface):
 
     name = "backup"
     columns = {
-        "id": "TEXT",
+        "session_id": "TEXT",
         "action": "TEXT",
-        "data": "TEXT"}
+        "old": "TEXT",
+        "new": "TEXT"}
+    backup_actions = ["insert", "update", "remove"]
+
+    def insert(self, session_id, action, old, new) -> None:
+        if action not in self.backup_actions:
+            raise sqlite3.Error(f"Not a valid backup action: '{action}'. "
+                                f"Allowed actions: {', '.join(self.backup_actions)}.")
+        insert_row(
+            table=self.name,
+            connection=self.connection,
+            session_id=session_id,
+            action=action,
+            old=old,
+            new=new)
 
 
 def table_exists(table: str, connection: sqlite3.Connection) -> bool:
@@ -143,23 +157,27 @@ def read_table(table: str, connection: sqlite3.Connection, where: str = "") -> l
     return data_rows
 
 
-def insert_row(data: dict, table: str, connection: sqlite3.Connection) -> None:
+def insert_row(table: str, connection: sqlite3.Connection, **kwargs) -> None:
     """
     Inserts a Listing to SQL table.
-    :param data: Key-value pairs in dict.
     :param table: Name of SQL table where the data should be inserted to.
     :param connection: SQL connection object.
+    :param kwargs: Key-value pairs to insert.
     :return: None
     """
     column_names = list()
     values = list()
-    for column_name, value in data.items():
+    for column_name, value in kwargs.items():
         column_names += [column_name]
-        values += [f'"{value}"' if isinstance(value, str) else str(value)]       # Add quotes to string variables
+        if isinstance(value, str):
+            value = value.replace("'", "''")            # Change single quotes to double single quotes
+            value = f"'{value}'"                        # Add quotes to string variables
+        values += [str(value)]
     column_names_string = ",".join(column_names)
     values_string = ",".join(values)
     insert_data_command = f"INSERT INTO {table} ({column_names_string})\n" \
                           f"VALUES\n\t({values_string});"
+    # log debug: insert_data_command
     sql_cursor = connection.cursor()
     sql_cursor.execute(insert_data_command)
     connection.commit()
@@ -184,6 +202,7 @@ def update_row(column: str, value: str, table: str,
     connection.commit()
     return
 
+
 def get_table_info(table: str, connection: sqlite3.Connection) -> dict:
     """
     Get dict with basic table info
@@ -199,4 +218,3 @@ def get_table_info(table: str, connection: sqlite3.Connection) -> dict:
     n_rows_response = cursor.execute(get_n_rows_command)
     n_rows = n_rows_response.fetchone()[0]
     return {"columns": columns, "n_rows": n_rows}
-
