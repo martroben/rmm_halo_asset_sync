@@ -34,10 +34,11 @@ class Client:
 
 
 class NsightClient(Client):
-    def __init__(self, client_xml, toplevel_id=""):
+    toplevel_id = ""
+
+    def __init__(self, client_xml):
         self.client_id = client_xml.find("./clientid").text
         self.name = client_xml.find("./name").text
-        self.toplevel_id = toplevel_id
 
     def json_payload(self):
         payload = {
@@ -135,7 +136,10 @@ halo_authorizer = halo_requests.HaloAuthorizer(
     client_id=env_parameters["HALO_API_CLIENT_ID"],
     secret=env_parameters["HALO_API_CLIENT_SECRET"])
 
-halo_client_token = halo_authorizer.get_token("edit:customers", log_name=log_name)
+halo_client_token = halo_authorizer.get_token(
+    scope="edit:customers",
+    log_name=log_name,
+    fatal=True)             # Abort if there is error in authorization
 
 
 ###############
@@ -146,35 +150,54 @@ halo_client_token = halo_authorizer.get_token("edit:customers", log_name=log_nam
 nsight_clients_response = nsight_requests.get_clients(
     url=env_parameters["NSIGHT_BASE_URL"],
     api_key=env_parameters["NSIGHT_API_KEY"],
-    log_name=log_name)
+    log_name=log_name,
+    fatal=False)            # Continue even if unable to retrieve N-sight clients
 
 nsight_clients_raw = xml_ET.fromstring(nsight_clients_response.text).findall("./items/client")
 nsight_clients = [NsightClient(client) for client in nsight_clients_raw]
 
+halo_client_session = halo_requests.HaloSession(halo_client_token)
+
 # Set toplevel id for N-sight clients if toplevel name is provided in .ini, and it exists in Halo
-nsight_toplevel = str(ini_parameters.get("HALO_NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
+nsight_toplevel = str(ini_parameters.get("NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
 if nsight_toplevel:
-    Client.comparison_variables += ["toplevel_id"]
-    toplevel_response = halo_requests.get_clients(
+    # Get Halo toplevels
+    halo_toplevel_api = halo_requests.HaloInterface(
         url=env_parameters["HALO_API_URL"],
         endpoint=ini_parameters["HALO_TOPLEVEL_ENDPOINT"],
-        token=halo_client_token)
+        dryrun=env_parameters["DRYRUN"])
 
-    toplevels_raw = toplevel_response.json()["tree"]
-    toplevels = [HaloToplevel(toplevel) for toplevel in toplevels_raw]
+    halo_toplevel_parameters = {"includeinactive": False}
+    halo_toplevels_raw = halo_toplevel_api.get_all(
+        field="tree",
+        session=halo_client_session,
+        parameters=halo_toplevel_parameters,
+        log_name="clients")
 
-    nsight_toplevel_ids = [toplevel.toplevel_id for toplevel in toplevels if toplevel.name == nsight_toplevel]
-    if nsight_toplevel_ids:
-        for client in nsight_clients:
-            client.toplevel_id = nsight_toplevel_ids[0]
+    halo_toplevels = [HaloToplevel(toplevel) for toplevel in halo_toplevels_raw]
+
+    # Set new default toplevel id for all N-sight clients
+    nsight_toplevel_id = [toplevel.toplevel_id for toplevel in halo_toplevels if toplevel.name == nsight_toplevel][0]
+    NsightClient.toplevel_id = nsight_toplevel_id
+
+    # Add toplevel_id as a comparison variable (only clients with matching toplevel_id's are counted as equal)
+    Client.comparison_variables += ["toplevel_id"]
+
 
 # Get Halo clients
-halo_clients_response = halo_requests.get_clients(
+halo_client_api = halo_requests.HaloInterface(
     url=env_parameters["HALO_API_URL"],
     endpoint=ini_parameters["HALO_CLIENT_ENDPOINT"],
-    token=halo_client_token)
+    dryrun=env_parameters["DRYRUN"])
 
-halo_clients_raw = halo_clients_response.json()["clients"]
+halo_client_parameters = {"includeinactive": False}
+halo_clients_raw = halo_client_api.get_all(
+    field="clients",
+    session=halo_client_session,
+    parameters=halo_client_parameters,
+    log_name="clients",
+    fatal=True)             # Abort if a request fails, otherwise missing clients will be incorrectly determined
+
 halo_clients = [HaloClient(client) for client in halo_clients_raw]
 
 
@@ -192,30 +215,36 @@ missing_clients = [client for client in nsight_clients if client not in halo_cli
 if not missing_clients:
     exit(0)
 
-logger.debug(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Found N-sight Clients that are not synced to Halo: " 
-             f"{len(missing_clients)}")
+logger.info(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Found N-sight Clients that are not synced to Halo: " 
+            f"{len(missing_clients)}")
 
 
 with halo_requests.HaloSession(halo_client_token) as halo_session:
     for client in missing_clients:
         payload = client.json_payload()
-        logger.debug(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Posting new Client to Halo: {str(client)}")
-
-        halo_requests.post_client(
-            session=halo_session,
-            url=env_parameters["HALO_API_URL"],
-            endpoint=ini_parameters["HALO_CLIENT_ENDPOINT"],
-            payload=payload,
-            log_name=log_name,
-            dryrun=env_parameters["DRYRUN"])
+        logger.info(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Posting new Client to Halo: {str(client)}")
 
         sql_backup_table.insert(
             session_id=session_id,
             action="insert",
             old="",
-            new=payload)
+            new=payload) #################### Only post if backup successful
 
-        logger.debug(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Client backed up: {str(client)}")
+        halo_client_api.post(
+            session=halo_client_session,
+            payload=payload,
+            log_name="clients",
+            fatal=False)            # Don't abort, even if one post request fails
+
+        # halo_requests.post_client(
+        #     session=halo_session,
+        #     url=env_parameters["HALO_API_URL"],
+        #     endpoint=ini_parameters["HALO_CLIENT_ENDPOINT"],
+        #     payload=payload,
+        #     log_name=log_name,
+        #     dryrun=env_parameters["DRYRUN"])
+
+        logger.info(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Client backed up: {str(client)}")
 
 
 

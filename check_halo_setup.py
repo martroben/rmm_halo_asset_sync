@@ -272,7 +272,7 @@ del log_string
 # Check if Top Level exists #
 #############################
 
-nsight_toplevel = str(ini_parameters.get("HALO_NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
+nsight_toplevel = str(ini_parameters.get("NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
 
 if nsight_toplevel:
     log_string = f"{'-'*100}\nChecking if Halo has Top Level '{nsight_toplevel}' for N-sight clients..."

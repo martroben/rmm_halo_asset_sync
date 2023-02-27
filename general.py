@@ -8,11 +8,9 @@ import random
 import re
 from time import sleep
 
-import requests
-
 
 def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
-                   exceptions: (Exception, tuple[Exception]) = Exception, fatal: bool = False):
+                   exceptions: (Exception, tuple[Exception]) = Exception):
     """
     Retries the wrapped function. Meant to be used as a decorator.
     Parses the parameter 'log_name' from inner function and uses the logger with that name.
@@ -20,17 +18,19 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
     times: int - The number of times to repeat the wrapped function (default: 3).
     interval_sec: float or a function with no arguments that returns a float
     exceptions: tuple[Exception] - Tuple of exceptions that trigger a retry attempt (default: Exception).
-    fatal: If all retry attempts fail, the last exception is re-raised.
-    How many seconds to wait between retry attempts (default: 8)
+    How many seconds to wait between retry attempts (default: 3)
+    log_name: str - Name of Logger to use. Defaults to root.
+    fatal: bool - If all retry attempts fail, the last exception is re-raised.
     """
     if function is None:
-        return partial(retry_function, times=times, interval_sec=interval_sec, exceptions=exceptions, fatal=fatal)
+        return partial(retry_function, times=times, interval_sec=interval_sec, exceptions=exceptions)
 
     @wraps(function)
     def retry(*args, **kwargs):
         attempt = 1
-        log_name = {**kwargs}.get("log_name", "root")         # Get log name from wrapped function.
-        logger = logging.getLogger(log_name)                  # Use root if no log name provided.
+        fatal = kwargs.get("fatal", False)              # True: re-raise last exception if all retry attempts fail.
+        log_name = kwargs.get("log_name", "root")       # Get log name from wrapped function.
+        logger = logging.getLogger(log_name)            # Use root if no log name provided.
         while attempt <= times:
             try:
                 response = function(*args, **kwargs)
@@ -100,20 +100,28 @@ def parse_input_file(path: str, parse_values: bool = True, set_environmental_var
     return parsed_values
 
 
-def generate_random_hex(length):
+def generate_random_hex(length: int) -> str:
+    """
+    Generate random hexadecimal string with given length.
+    Alternative: f"{16 ** 8 - 1:08x}"). Has limited length, because of maximum int size.
+    :param length: Length of the hex string.
+    :return: A string representation of a hex with the requested length
+    """
     decimals = random.choices(range(16), k=length)
     hexadecimal = "".join(["{:x}".format(decimal) for decimal in decimals])
     return hexadecimal
 
 
-def get_temporary_id():
+# def get_temporary_id():
+#
+#     temporary_id_components = [
+#         generate_random_hex(8),
+#         generate_random_hex(4),
+#         generate_random_hex(4),
+#         generate_random_hex(4),
+#         generate_random_hex(12)]
+#
+#     temporary_id = "-".join(temporary_id_components)
+#     return temporary_id
 
-    temporary_id_components = [
-        generate_random_hex(8),
-        generate_random_hex(4),
-        generate_random_hex(4),
-        generate_random_hex(4),
-        generate_random_hex(12)]
 
-    temporary_id = "-".join(temporary_id_components)
-    return temporary_id
