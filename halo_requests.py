@@ -59,9 +59,6 @@ class HaloInterface:
     @general.retry_function()
     def request(self, session: HaloSession, method: str, params: dict = None, payload: dict = None, **kwargs):
 
-        if self.dryrun:
-            return requests.Response()
-
         response = session.request(
             method=method,
             url=self.endpoint_url,
@@ -126,7 +123,7 @@ class HaloInterface:
         :param kwargs: Additional keyword parameters to supply optional log_name and fatal parameters.
         :return: Response object if response succeeded. Else None
         """
-        if kwargs.get("dryrun", False):
+        if self.dryrun:
             return requests.Response()
 
         response = self.request(session=session, method="post", payload=payload, **kwargs)

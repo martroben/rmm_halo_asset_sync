@@ -1,6 +1,9 @@
 
-import sqlite3
+# standard
 from abc import ABC, abstractmethod
+from functools import partial
+import logging
+import sqlite3
 
 
 class SqlInterface(ABC):
@@ -23,10 +26,10 @@ class SqlInterface(ABC):
             self.check()
             self.active = 1
         else:
-            self.insert = self.null_function
-            self.update = self.null_function
+            self.insert = partial(self.mock_action, sql_action="insert")
+            self.update = partial(self.mock_action, sql_action="update")
 
-    def check(self) -> None:
+    def check(self, **kwargs) -> None:
         if not table_exists(self.name, self.connection):
             create_table(
                 table=self.name,
@@ -36,7 +39,7 @@ class SqlInterface(ABC):
             error_string = f"SQL table not created. Table: '{self.name}'."
             raise self.connection.Error(error_string)
 
-    def read(self, where: str = "") -> list[dict]:
+    def read(self, where: str = "", **kwargs) -> list[dict]:
         result = read_table(
             table=self.name,
             connection=self.connection,
@@ -44,12 +47,15 @@ class SqlInterface(ABC):
         return result
 
     def insert(self, **kwargs) -> None:
+        log_name = kwargs.get("log_name", "root")       # Get log name from wrapped function.
+        logger = logging.getLogger(log_name)            # Use root if no log name provided.
+        kwargs.pop("log_name", None)
         insert_row(
             table=self.name,
             connection=self.connection,
             **kwargs)
 
-    def update(self, column: str, value: (int, float, str, bool), where: str = "") -> None:
+    def update(self, column: str, value: (int, float, str, bool), where: str = "", **kwargs) -> None:
         update_row(
             column=column,
             value=value,
@@ -57,7 +63,7 @@ class SqlInterface(ABC):
             connection=self.connection,
             where=where)
 
-    def info(self) -> dict:
+    def info(self, **kwargs) -> dict:
         if not self.active:
             return {"active": 0}
         result = get_table_info(
@@ -66,8 +72,17 @@ class SqlInterface(ABC):
         result["active"] = 1
         return result
 
-    def null_function(self, *args, **kwargs):
-        pass
+    def mock_action(self, *args, **kwargs) -> None:
+        log_name = kwargs.get("log_name", "root")       # Get log name from wrapped function.
+        logger = logging.getLogger(log_name)            # Use root if no log name provided.
+
+        sql_action = kwargs.pop("sql_action", "")
+        arguments = ", ".join([argument for argument in args])
+        keyword_arguments = ", ".join([f"{key}: {value}" for key, value in kwargs.items()])
+        logger.debug(f"(BACKUP INACTIVE) No action taken. "
+                     f"Received action: {sql_action}. "
+                     f"Received positional arguments: {arguments}. "
+                     f"Received keyword arguments: {keyword_arguments}.")
 
 
 class SqlTableSessions(SqlInterface):
@@ -92,7 +107,10 @@ class SqlTableBackup(SqlInterface):
         "new": "TEXT"}
     backup_actions = ["insert", "update", "remove"]
 
-    def insert(self, session_id, action, old, new) -> None:
+    def insert(self, session_id, action, old, new, **kwargs) -> None:
+        log_name = kwargs.get("log_name", "root")       # Get log name from wrapped function.
+        logger = logging.getLogger(log_name)            # Use root if no log name provided.
+
         if action not in self.backup_actions:
             raise sqlite3.Error(f"Not a valid backup action: '{action}'. "
                                 f"Allowed actions: {', '.join(self.backup_actions)}.")
@@ -177,7 +195,7 @@ def insert_row(table: str, connection: sqlite3.Connection, **kwargs) -> None:
     values_string = ",".join(values)
     insert_data_command = f"INSERT INTO {table} ({column_names_string})\n" \
                           f"VALUES\n\t({values_string});"
-    # log debug: insert_data_command
+    ################## log debug: insert_data_command
     sql_cursor = connection.cursor()
     sql_cursor.execute(insert_data_command)
     connection.commit()

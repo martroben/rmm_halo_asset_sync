@@ -116,8 +116,10 @@ if ini_parameters["SQL_DATABASE_PATH"] != ":memory:":
 sql_database_path = ":memory:" if env_parameters["DRYRUN"] else ini_parameters["SQL_DATABASE_PATH"]
 
 sql_connection = sqlite3.connect(sql_database_path)
-sql_sessions_table = sql_operations.SqlTableSessions(sql_connection)
-sql_backup_table = sql_operations.SqlTableBackup(sql_connection, active=ini_parameters["BACKUP_ACTIVE"])
+sql_sessions_table = sql_operations.SqlTableSessions(connection=sql_connection)
+sql_backup_table = sql_operations.SqlTableBackup(
+    connection=sql_connection,
+    active=ini_parameters["BACKUP_ACTIVE"])
 
 # Insert session info to SQL
 sql_sessions_table.insert(
@@ -219,22 +221,28 @@ logger.info(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Found N-sight Clients 
             f"{len(missing_clients)}")
 
 
-with halo_requests.HaloSession(halo_client_token) as halo_session:
-    for client in missing_clients:
-        payload = client.json_payload()
-        logger.info(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Posting new Client to Halo: {str(client)}")
+for client in missing_clients:
+    payload = client.json_payload()
+    logger.info(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Adding new Client to Halo: {str(client)}")
 
+    try:                            # Only post if backup is successful
         sql_backup_table.insert(
             session_id=session_id,
             action="insert",
             old="",
-            new=payload) #################### Only post if backup successful
+            new=payload,
+            log_name="clients")
+        logger.info(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Client backup action completed, posting to Halo.")
 
         halo_client_api.post(
             session=halo_client_session,
             payload=payload,
             log_name="clients",
             fatal=False)            # Don't abort, even if one post request fails
+        logger.info(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Post action completed.")
+
+    except:
+        logger.warning(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Failed to add Client to Halo: {str(client)}")
 
         # halo_requests.post_client(
         #     session=halo_session,
@@ -244,7 +252,7 @@ with halo_requests.HaloSession(halo_client_token) as halo_session:
         #     log_name=log_name,
         #     dryrun=env_parameters["DRYRUN"])
 
-        logger.info(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Client backed up: {str(client)}")
+
 
 
 
