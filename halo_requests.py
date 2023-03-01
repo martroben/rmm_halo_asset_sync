@@ -57,18 +57,18 @@ class HaloInterface:
         self.dryrun = dryrun
 
     @general.retry_function()
-    def request(self, session: HaloSession, method: str, params: dict = None, payload: dict = None, **kwargs):
+    def request(self, session: HaloSession, method: str, params: dict = None, json: (list, dict) = None, **kwargs):
 
         response = session.request(
             method=method,
             url=self.endpoint_url,
             params=params,
-            json=[payload])
+            json=json)
 
-        if not response.ok:  # Raise error to trigger retry
+        if not response.ok:                            # Raise error to trigger retry
             error_str = f"Request gave a bad response. URL: {self.endpoint_url} | method: {method} | " \
                         f"Response {response.status_code}: {response.reason} | params: {params} | " \
-                        f"payload: {payload}"
+                        f"payload: {json}"
             raise ConnectionError(error_str)
         return response
 
@@ -115,56 +115,38 @@ class HaloInterface:
             items += item if isinstance(item, list) else [item]
         return items
 
-    def post(self, session: HaloSession, payload: str = None, **kwargs) -> requests.Response | None:
+    def post(self, session: HaloSession, json: (list, dict) = None, **kwargs) -> requests.Response | None:
         """
         Post a json payload.
         :param session: HaloSession object.
-        :param payload: String in json format
+        :param json: Json data: dict or dict wrapped in list.
         :param kwargs: Additional keyword parameters to supply optional log_name and fatal parameters.
         :return: Response object if response succeeded. Else None
         """
         if self.dryrun:
             return requests.Response()
 
-        response = self.request(session=session, method="post", payload=payload, **kwargs)
+        response = self.request(
+            session=session,
+            method="post",
+            json=json,
+            **kwargs)
         return response
 
 
 # @general.retry_function()
-# def get_clients(url: str, endpoint: str, token: dict, **kwargs) -> requests.Response:
+# def post_client(session: requests.Session, url: str, endpoint: str, payload: str, **kwargs) -> requests.Response:
 #
 #     if kwargs.get("dryrun", False):
 #         return requests.Response()
 #
 #     api_client_url = url.strip("/") + "/" + endpoint
-#     read_client_headers = {"Authorization": f"{token['token_type']} {token['access_token']}"}
-#     read_client_parameters = {
-#         "includeinactive": False,
-#         "pageinate": True,
-#         "page_size": 50,
-#         "page_no": 1}
-#
-#     read_client_response = requests.get(
+#     response = session.post(
 #         url=api_client_url,
-#         headers=read_client_headers,
-#         params=read_client_parameters)
+#         json=[payload])
 #
-#     return read_client_response
-
-
-@general.retry_function()
-def post_client(session: requests.Session, url: str, endpoint: str, payload: str, **kwargs) -> requests.Response:
-
-    if kwargs.get("dryrun", False):
-        return requests.Response()
-
-    api_client_url = url.strip("/") + "/" + endpoint
-    response = session.post(
-        url=api_client_url,
-        json=[payload])
-
-    if not response.ok:         # Raise error to trigger retry
-        error_str = f"Posting Client gave a bad response. URL: {url} | " \
-                    f"Response {response.status_code}: {response.reason} | Payload: {payload}"
-        raise ConnectionError(error_str)
-    return response
+#     if not response.ok:         # Raise error to trigger retry
+#         error_str = f"Posting Client gave a bad response. URL: {url} | " \
+#                     f"Response {response.status_code}: {response.reason} | Payload: {payload}"
+#         raise ConnectionError(error_str)
+#     return response

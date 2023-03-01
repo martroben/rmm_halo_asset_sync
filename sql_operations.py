@@ -8,7 +8,7 @@ import sqlite3
 
 class SqlInterface(ABC):
 
-    active = 0
+    active = True
 
     @property
     @abstractmethod
@@ -20,14 +20,14 @@ class SqlInterface(ABC):
     def columns(self):
         """Names of columns in the SQL table"""
 
-    def __init__(self, connection, active=1):
+    def __init__(self, connection, active=True):
         self.connection = connection
-        if active:
-            self.check()
-            self.active = 1
-        else:
+        if not active:                      # If active=False, replace editing functions with mock action.
+            self.active = False
             self.insert = partial(self.mock_action, sql_action="insert")
             self.update = partial(self.mock_action, sql_action="update")
+        else:
+            self.check()
 
     def check(self, **kwargs) -> None:
         if not table_exists(self.name, self.connection):
@@ -47,9 +47,8 @@ class SqlInterface(ABC):
         return result
 
     def insert(self, **kwargs) -> None:
-        log_name = kwargs.get("log_name", "root")       # Get log name from wrapped function.
+        log_name = kwargs.pop("log_name", "root")       # Get log name from wrapped function.
         logger = logging.getLogger(log_name)            # Use root if no log name provided.
-        kwargs.pop("log_name", None)
         insert_row(
             table=self.name,
             connection=self.connection,
@@ -73,23 +72,22 @@ class SqlInterface(ABC):
         return result
 
     def mock_action(self, *args, **kwargs) -> None:
-        log_name = kwargs.get("log_name", "root")       # Get log name from wrapped function.
+        log_name = kwargs.pop("log_name", "root")       # Get log name from wrapped function.
         logger = logging.getLogger(log_name)            # Use root if no log name provided.
 
         sql_action = kwargs.pop("sql_action", "")
         arguments = ", ".join([argument for argument in args])
         keyword_arguments = ", ".join([f"{key}: {value}" for key, value in kwargs.items()])
-        logger.debug(f"(BACKUP INACTIVE) No action taken. "
-                     f"Received action: {sql_action}. "
+        logger.debug(f"(SQL INACTIVE) Received action: {sql_action}. "
                      f"Received positional arguments: {arguments}. "
                      f"Received keyword arguments: {keyword_arguments}.")
+        logger.info("(SQL INACTIVE) No action taken.")
 
 
 class SqlTableSessions(SqlInterface):
-
     name = "sessions"
     columns = {
-        "id": "TEXT",
+        "session_id": "TEXT",
         "time_unix": "INTEGER",
         "status": "TEXT",
         "clients_synced": "INTEGER",
@@ -98,17 +96,18 @@ class SqlTableSessions(SqlInterface):
 
 
 class SqlTableBackup(SqlInterface):
-
     name = "backup"
     columns = {
         "session_id": "TEXT",
+        "action_id": "TEXT",
         "action": "TEXT",
         "old": "TEXT",
-        "new": "TEXT"}
+        "new": "TEXT",
+        "post_successful": "INTEGER"}
     backup_actions = ["insert", "update", "remove"]
 
-    def insert(self, session_id, action, old, new, **kwargs) -> None:
-        log_name = kwargs.get("log_name", "root")       # Get log name from wrapped function.
+    def insert(self, session_id, action_id, action, old, new, post_successful, **kwargs) -> None:
+        log_name = kwargs.pop("log_name", "root")       # Get log name from wrapped function.
         logger = logging.getLogger(log_name)            # Use root if no log name provided.
 
         if action not in self.backup_actions:
@@ -118,9 +117,11 @@ class SqlTableBackup(SqlInterface):
             table=self.name,
             connection=self.connection,
             session_id=session_id,
+            action_id=action_id,
             action=action,
             old=old,
-            new=new)
+            new=new,
+            post_successful=post_successful)
 
 
 def table_exists(table: str, connection: sqlite3.Connection) -> bool:
@@ -195,7 +196,6 @@ def insert_row(table: str, connection: sqlite3.Connection, **kwargs) -> None:
     values_string = ",".join(values)
     insert_data_command = f"INSERT INTO {table} ({column_names_string})\n" \
                           f"VALUES\n\t({values_string});"
-    ################## log debug: insert_data_command
     sql_cursor = connection.cursor()
     sql_cursor.execute(insert_data_command)
     connection.commit()

@@ -29,21 +29,25 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
     def retry(*args, **kwargs):
         attempt = 1
         fatal = kwargs.get("fatal", False)              # True: re-raise last exception if all retry attempts fail.
-        log_name = kwargs.get("log_name", "root")       # Get log name from wrapped function.
+        log_name = kwargs.pop("log_name", "root")       # Get log name from wrapped function.
         logger = logging.getLogger(log_name)            # Use root if no log name provided.
         while attempt <= times:
             try:
                 response = function(*args, **kwargs)
             except exceptions as exception:
-                log_string = f"Retrying function {function.__name__} in {round(interval_sec, 2)} seconds, " \
-                             f"because {type(exception).__name__} exception occurred: {exception}\n" \
-                             f"Attempt {attempt} of {times}."
-                logger.info(log_string)
-                attempt += 1
-                if attempt <= times:
+                if attempt < times:
+                    log_string = f"Retrying function '{function.__name__}' in {round(interval_sec, 2)} seconds, " \
+                                 f"because {type(exception).__name__} exception occurred. Attempt {attempt} of {times}."
+                    logger.info(log_string)
+                    logger.debug(exception)
+                    attempt += 1
                     sleep(interval_sec)
                 else:
-                    logger.warning("Retry failed!")
+                    log_string = f"Retrying function '{function.__name__}' failed after {times} attempts, " \
+                                 f"because {type(exception).__name__} exception occurred."
+                    logger.warning(log_string)
+                    logger.debug(exception)
+                    attempt += 1
                     if fatal:
                         raise exception
             else:

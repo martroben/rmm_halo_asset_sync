@@ -26,38 +26,43 @@ class Client:
                            for variable in self.comparison_variables]
         return all(matching_fields)
 
-    def __repr__(self):
-        name = self.__getattribute__("name")
-        instance_id = self.__getattribute__("toplevel_id") if self.__class__ is HaloToplevel \
-            else self.__getattribute__("client_id")
-        return f"{name} (id: {instance_id})"
-
 
 class NsightClient(Client):
     toplevel_id = ""
+    halo_colour = "#a75ded"         # N-able purple to quickly distinguish Clients synced from N-sight
 
     def __init__(self, client_xml):
-        self.client_id = client_xml.find("./clientid").text
+        self.nsight_id = client_xml.find("./clientid").text
         self.name = client_xml.find("./name").text
 
-    def json_payload(self):
+    def __repr__(self):
+        return f"{self.name} (N-sight id: {self.nsight_id})"
+
+    def get_post_payload(self):
         payload = {
             "name": self.name,
-            "toplevel_id": self.toplevel_id}
-        return json.dumps(payload)
+            "toplevel_id": str(self.toplevel_id),
+            "colour": self.halo_colour}
+        return payload
 
 
 class HaloClient(Client):
     def __init__(self, client):
-        self.client_id = client["id"]
+        self.halo_id = client["id"]
         self.name = client["name"]
         self.toplevel_id = client["toplevel_id"]
+
+    def __repr__(self):
+        return f"{self.name} (Halo id: {self.halo_id})"
 
 
 class HaloToplevel(Client):
     def __init__(self, toplevel):
         self.toplevel_id = toplevel["id"]
         self.name = toplevel["name"]
+
+    def __repr__(self):
+        return f"{self.name} (Toplevel id: {self.toplevel_id})"
 
 
 ###########################################
@@ -93,10 +98,10 @@ session_id = general.generate_random_hex(8)
 
 log_name = "clients"
 logger = logging.getLogger(log_name)
-logger.setLevel(ini_parameters["LOG_LEVEL"])
+logger.setLevel(ini_parameters["LOG_LEVEL"].upper())
 handler = logging.StreamHandler()
 formatter = logging.Formatter(
-    fmt="{asctime} | {funcName} | {levelname}: {message}",
+    fmt=f"{{asctime}} | {session_id} | {{funcName}} | {{levelname}}: {{message}}",
     datefmt="%m/%d/%Y %H:%M:%S",
     style="{")
 handler.setFormatter(formatter)
@@ -123,7 +128,7 @@ sql_backup_table = sql_operations.SqlTableBackup(
 
 # Insert session info to SQL
 sql_sessions_table.insert(
-    id=session_id,
+    session_id=session_id,
     time_unix=int(datetime.now().timestamp()),
     status="started")
 
@@ -141,29 +146,33 @@ halo_authorizer = halo_requests.HaloAuthorizer(
 halo_client_token = halo_authorizer.get_token(
     scope="edit:customers",
     log_name=log_name,
-    fatal=True)             # Abort if there is error in authorization
+    fatal=True)                                         # Abort if there is error in authorization
 
 
-###############
-# Get clients #
-###############
+#######################
+# Get N-sight clients #
+#######################
 
-# Get N-Sight clients
 nsight_clients_response = nsight_requests.get_clients(
     url=env_parameters["NSIGHT_BASE_URL"],
     api_key=env_parameters["NSIGHT_API_KEY"],
     log_name=log_name,
-    fatal=False)            # Continue even if unable to retrieve N-sight clients
+    fatal=False)                                        # Continue even if unable to retrieve N-sight clients
 
 nsight_clients_raw = xml_ET.fromstring(nsight_clients_response.text).findall("./items/client")
 nsight_clients = [NsightClient(client) for client in nsight_clients_raw]
 
 halo_client_session = halo_requests.HaloSession(halo_client_token)
 
+
+#######################################
+# Handle N-sight toplevel if supplied #
+#######################################
+
 # Set toplevel id for N-sight clients if toplevel name is provided in .ini, and it exists in Halo
 nsight_toplevel = str(ini_parameters.get("NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
 if nsight_toplevel:
-    # Get Halo toplevels
+    # Get Halo toplevels to get the id of the input toplevel
     halo_toplevel_api = halo_requests.HaloInterface(
         url=env_parameters["HALO_API_URL"],
         endpoint=ini_parameters["HALO_TOPLEVEL_ENDPOINT"],
@@ -178,15 +187,19 @@ if nsight_toplevel:
 
     halo_toplevels = [HaloToplevel(toplevel) for toplevel in halo_toplevels_raw]
 
-    # Set new default toplevel id for all N-sight clients
     nsight_toplevel_id = [toplevel.toplevel_id for toplevel in halo_toplevels if toplevel.name == nsight_toplevel][0]
-    NsightClient.toplevel_id = nsight_toplevel_id
+    for client in nsight_clients:
+        client.toplevel_id = nsight_toplevel_id
 
-    # Add toplevel_id as a comparison variable (only clients with matching toplevel_id's are counted as equal)
+    # Add toplevel_id as a comparison variable for Client class
+    # (only clients with matching toplevel_id's are counted as equal)
     Client.comparison_variables += ["toplevel_id"]
 
 
-# Get Halo clients
+####################
+# Get Halo clients #
+####################
+
 halo_client_api = halo_requests.HaloInterface(
     url=env_parameters["HALO_API_URL"],
     endpoint=ini_parameters["HALO_CLIENT_ENDPOINT"],
@@ -218,42 +231,49 @@ if not missing_clients:
     exit(0)
 
 logger.info(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Found N-sight Clients that are not synced to Halo: " 
-            f"{len(missing_clients)}")
-
+            f"count: {len(missing_clients)}")
 
 for client in missing_clients:
-    payload = client.json_payload()
     logger.info(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Adding new Client to Halo: {str(client)}")
+    action_id = general.generate_random_hex(8)
 
-    try:                            # Only post if backup is successful
+    try:                                        # Only post if backup is successful
+        logger.debug(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Backing up Client.")
+        backup_data = json.dumps([client.get_post_payload()])
         sql_backup_table.insert(
             session_id=session_id,
+            action_id=action_id,
             action="insert",
             old="",
-            new=payload,
+            new=backup_data,
+            post_successful=0,
             log_name="clients")
-        logger.info(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Client backup action completed, posting to Halo.")
+        logger.debug(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}End of Client backup action.")
 
-        halo_client_api.post(
+        logger.debug(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Posting Client to Halo.")
+        response = halo_client_api.post(
             session=halo_client_session,
-            payload=payload,
+            json=[client.get_post_payload()],   # Halo post accepts dict wrapped in a list
             log_name="clients",
-            fatal=False)            # Don't abort, even if one post request fails
-        logger.info(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Post action completed.")
+            fatal=False)                        # Don't abort, even if one post request fails
 
-    except:
-        logger.warning(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Failed to add Client to Halo: {str(client)}")
+        if response:
+            logger.debug(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Post successful.")
+            sql_backup_table.update(
+                column="post_successful",
+                value=1,
+                where=f'action_id == "{action_id}"')
+        else:
+            logger.warning(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Posting Client failed: {client}")
 
-        # halo_requests.post_client(
-        #     session=halo_session,
-        #     url=env_parameters["HALO_API_URL"],
-        #     endpoint=ini_parameters["HALO_CLIENT_ENDPOINT"],
-        #     payload=payload,
-        #     log_name=log_name,
-        #     dryrun=env_parameters["DRYRUN"])
+    except sqlite3.Error as sql_error:         # Catch cases where Client is not posted, because backup action failed
+        logger.warning(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}SQL error while adding new Client to Halo: "
+                       f"Client: {str(client)}, error: {sql_error}")
+
+    logger.info(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}End of Client post action.")
 
 
-
+######################## Add debug loggers to each sql_cursor.execute() command
 
 
 
