@@ -1,7 +1,11 @@
 
 # standard
+from functools import partial
+import logging
 import re
 import requests
+# external
+import responses as mock_responses
 # local
 import general
 
@@ -9,11 +13,12 @@ import general
 class HaloAuthorizer:
     grant_type = "client_credentials"
 
-    def __init__(self, url, tenant, client_id, secret):
+    def __init__(self, url: str, tenant: str, client_id: str, secret: str, log_name: str = "root"):
         self.url = url
         self.tenant = tenant
         self.client_id = client_id
         self.secret = secret
+        self.log_name = log_name
 
     @general.retry_function()
     def get_token(self, scope: str, **kwargs) -> dict[str]:
@@ -52,12 +57,17 @@ class HaloSession(requests.Session):
 
 
 class HaloInterface:
-    def __init__(self, url, endpoint: str, dryrun=False):
+    def __init__(self, url, endpoint: str, log_name: str = "root", dryrun=False):
         self.endpoint_url = url.strip("/") + "/" + endpoint
+        self.log_name = log_name
         self.dryrun = dryrun
+        if self.dryrun:
+            self.post = partial(self.mock_request, method="POST")
 
     @general.retry_function()
     def request(self, session: HaloSession, method: str, params: dict = None, json: (list, dict) = None, **kwargs):
+
+        logger = logging.getLogger(self.log_name)
 
         response = session.request(
             method=method,
@@ -65,11 +75,26 @@ class HaloInterface:
             params=params,
             json=json)
 
+        log_safe_headers = {key.lower(): value for key, value in response.request.headers.items()}
+        if "authorization" in log_safe_headers:
+            log_safe_headers["authorization"] = f"{log_safe_headers['authorization'][:10]}... " \
+                                                f"*** sensitive info pruned from log ***"
+        request_log_string = f"Performed {response.request.method} request. " \
+                             f"URL: {response.request.url}. " \
+                             f"Headers: {log_safe_headers}. " \
+                             f"Body: {response.request.body}."
+        logger.debug(request_log_string)
+
         if not response.ok:                            # Raise error to trigger retry
-            error_str = f"Request gave a bad response. URL: {self.endpoint_url} | method: {method} | " \
-                        f"Response {response.status_code}: {response.reason} | params: {params} | " \
-                        f"payload: {json}"
+            error_str = f"{method} request failed. URL: {self.endpoint_url} " \
+                        f"Status: {response.status_code} ({response.reason})"
             raise ConnectionError(error_str)
+
+        response_log_string = f"Received response. Status: {response.status_code} ({response.reason}). " \
+                              f"Headers: {response.headers}. " \
+                              f"Body: {response.text[:200]}"
+        logger.debug(response_log_string)
+
         return response
 
     def get(self, session: HaloSession, parameters: dict, **kwargs) -> list[requests.Response]:
@@ -123,9 +148,6 @@ class HaloInterface:
         :param kwargs: Additional keyword parameters to supply optional log_name and fatal parameters.
         :return: Response object if response succeeded. Else None
         """
-        if self.dryrun:
-            return requests.Response()
-
         response = self.request(
             session=session,
             method="post",
@@ -133,20 +155,33 @@ class HaloInterface:
             **kwargs)
         return response
 
+    def mock_request(self, *args, **kwargs) -> requests.Response:
+        logger = logging.getLogger(self.log_name)
 
-# @general.retry_function()
-# def post_client(session: requests.Session, url: str, endpoint: str, payload: str, **kwargs) -> requests.Response:
-#
-#     if kwargs.get("dryrun", False):
-#         return requests.Response()
-#
-#     api_client_url = url.strip("/") + "/" + endpoint
-#     response = session.post(
-#         url=api_client_url,
-#         json=[payload])
-#
-#     if not response.ok:         # Raise error to trigger retry
-#         error_str = f"Posting Client gave a bad response. URL: {url} | " \
-#                     f"Response {response.status_code}: {response.reason} | Payload: {payload}"
-#         raise ConnectionError(error_str)
-#     return response
+        method = kwargs.pop("method", "UNKNOWN METHOD")
+        session = kwargs.pop("session", requests.Session())
+        headers = {key.lower(): value for key, value in session.headers.items()}
+        json = kwargs.pop("json", list())
+        parameters = kwargs.pop("parameters", dict())
+
+        if "authorization" in headers:
+            headers["authorization"] = f"{headers['authorization'][:10]}... " \
+                                       f"*** sensitive info pruned from log ***"
+
+        logger.debug(f"MOCK {method.upper()} REQUEST. "
+                     f"URL: {self.endpoint_url}. "
+                     f"Headers: {headers}. "
+                     f"Parameters: {parameters} "
+                     f"Body: {json}.")
+        logger.info("MOCK REQUEST. No action taken.")
+
+        mock_responses.start()
+        mock_responses.add(                     # Registers a mock response for the next request
+            mock_responses.POST,
+            re.compile(r".*"),
+            json={"response": "mock response"},
+            status=201)
+
+        response = requests.post(self.endpoint_url)
+        return response
+

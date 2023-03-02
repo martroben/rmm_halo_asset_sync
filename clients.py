@@ -101,7 +101,8 @@ logger = logging.getLogger(log_name)
 logger.setLevel(ini_parameters["LOG_LEVEL"].upper())
 handler = logging.StreamHandler()
 formatter = logging.Formatter(
-    fmt=f"{{asctime}} | {session_id} | {{funcName}} | {{levelname}}: {{message}}",
+    fmt=f"{{asctime}} | {session_id} | {{funcName}} | "
+        f"{{levelname}}: {bool(env_parameters['DRYRUN'])*'(DRYRUN) '}{{message}}",
     datefmt="%m/%d/%Y %H:%M:%S",
     style="{")
 handler.setFormatter(formatter)
@@ -121,10 +122,11 @@ if ini_parameters["SQL_DATABASE_PATH"] != ":memory:":
 sql_database_path = ":memory:" if env_parameters["DRYRUN"] else ini_parameters["SQL_DATABASE_PATH"]
 
 sql_connection = sqlite3.connect(sql_database_path)
-sql_sessions_table = sql_operations.SqlTableSessions(connection=sql_connection)
+sql_sessions_table = sql_operations.SqlTableSessions(connection=sql_connection, log_name=log_name)
 sql_backup_table = sql_operations.SqlTableBackup(
     connection=sql_connection,
-    active=ini_parameters["BACKUP_ACTIVE"])
+    active=ini_parameters["BACKUP_ACTIVE"],
+    log_name=log_name)
 
 # Insert session info to SQL
 sql_sessions_table.insert(
@@ -141,11 +143,11 @@ halo_authorizer = halo_requests.HaloAuthorizer(
     url=env_parameters["HALO_API_AUTHENTICATION_URL"],
     tenant=env_parameters["HALO_API_TENANT"],
     client_id=env_parameters["HALO_API_CLIENT_ID"],
-    secret=env_parameters["HALO_API_CLIENT_SECRET"])
+    secret=env_parameters["HALO_API_CLIENT_SECRET"],
+    log_name=log_name)
 
 halo_client_token = halo_authorizer.get_token(
     scope="edit:customers",
-    log_name=log_name,
     fatal=True)                                         # Abort if there is error in authorization
 
 
@@ -162,7 +164,27 @@ nsight_clients_response = nsight_requests.get_clients(
 nsight_clients_raw = xml_ET.fromstring(nsight_clients_response.text).findall("./items/client")
 nsight_clients = [NsightClient(client) for client in nsight_clients_raw]
 
+
+####################
+# Get Halo clients #
+####################
+
 halo_client_session = halo_requests.HaloSession(halo_client_token)
+
+halo_client_api = halo_requests.HaloInterface(
+    url=env_parameters["HALO_API_URL"],
+    endpoint=ini_parameters["HALO_CLIENT_ENDPOINT"],
+    log_name=log_name,
+    dryrun=bool(env_parameters["DRYRUN"]))
+
+halo_client_parameters = {"includeinactive": False}
+halo_clients_raw = halo_client_api.get_all(
+    field="clients",
+    session=halo_client_session,
+    parameters=halo_client_parameters,
+    fatal=True)             # Abort if a request fails, otherwise missing clients will be incorrectly determined
+
+halo_clients = [HaloClient(client) for client in halo_clients_raw]
 
 
 #######################################
@@ -176,14 +198,14 @@ if nsight_toplevel:
     halo_toplevel_api = halo_requests.HaloInterface(
         url=env_parameters["HALO_API_URL"],
         endpoint=ini_parameters["HALO_TOPLEVEL_ENDPOINT"],
-        dryrun=env_parameters["DRYRUN"])
+        log_name=log_name,
+        dryrun=bool(env_parameters["DRYRUN"]))
 
     halo_toplevel_parameters = {"includeinactive": False}
     halo_toplevels_raw = halo_toplevel_api.get_all(
         field="tree",
         session=halo_client_session,
-        parameters=halo_toplevel_parameters,
-        log_name="clients")
+        parameters=halo_toplevel_parameters)
 
     halo_toplevels = [HaloToplevel(toplevel) for toplevel in halo_toplevels_raw]
 
@@ -194,26 +216,6 @@ if nsight_toplevel:
     # Add toplevel_id as a comparison variable for Client class
     # (only clients with matching toplevel_id's are counted as equal)
     Client.comparison_variables += ["toplevel_id"]
-
-
-####################
-# Get Halo clients #
-####################
-
-halo_client_api = halo_requests.HaloInterface(
-    url=env_parameters["HALO_API_URL"],
-    endpoint=ini_parameters["HALO_CLIENT_ENDPOINT"],
-    dryrun=env_parameters["DRYRUN"])
-
-halo_client_parameters = {"includeinactive": False}
-halo_clients_raw = halo_client_api.get_all(
-    field="clients",
-    session=halo_client_session,
-    parameters=halo_client_parameters,
-    log_name="clients",
-    fatal=True)             # Abort if a request fails, otherwise missing clients will be incorrectly determined
-
-halo_clients = [HaloClient(client) for client in halo_clients_raw]
 
 
 #################################
@@ -230,50 +232,45 @@ missing_clients = [client for client in nsight_clients if client not in halo_cli
 if not missing_clients:
     exit(0)
 
-logger.info(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Found N-sight Clients that are not synced to Halo: " 
-            f"count: {len(missing_clients)}")
+logger.info(f"Found N-sight Clients that are not synced to Halo. " 
+            f"Count: {len(missing_clients)}")
 
 for client in missing_clients:
-    logger.info(f"{bool(env_parameters['DRYRUN'])*'(DRYRUN) '}Adding new Client to Halo: {str(client)}")
-    action_id = general.generate_random_hex(8)
+    logger.info(f"Adding new Client to Halo: {str(client)}")
+    backup_id = general.generate_random_hex(8)
 
     try:                                        # Only post if backup is successful
-        logger.debug(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Backing up Client.")
+        logger.debug(f"Backing up Client. Backup id: {backup_id}")
         backup_data = json.dumps([client.get_post_payload()])
         sql_backup_table.insert(
             session_id=session_id,
-            action_id=action_id,
+            backup_id=backup_id,
             action="insert",
             old="",
             new=backup_data,
-            post_successful=0,
-            log_name="clients")
-        logger.debug(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}End of Client backup action.")
+            post_successful=0)
+        logger.debug(f"End of Client backup action.")
 
-        logger.debug(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Posting Client to Halo.")
+        logger.debug(f"Posting Client to Halo.")
         response = halo_client_api.post(
             session=halo_client_session,
             json=[client.get_post_payload()],   # Halo post accepts dict wrapped in a list
-            log_name="clients",
             fatal=False)                        # Don't abort, even if one post request fails
 
         if response:
-            logger.debug(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Post successful.")
+            logger.debug(f"Post successful.")
             sql_backup_table.update(
                 column="post_successful",
                 value=1,
-                where=f'action_id == "{action_id}"')
+                where=f'backup_id == "{backup_id}"')
         else:
-            logger.warning(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}Posting Client failed: {client}")
+            logger.warning(f"Posting Client failed. {client}, "
+                           f"Action id: {backup_id}")
 
     except sqlite3.Error as sql_error:         # Catch cases where Client is not posted, because backup action failed
-        logger.warning(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}SQL error while adding new Client to Halo: "
-                       f"Client: {str(client)}, error: {sql_error}")
+        logger.warning(f"SQL error while adding new Client to Halo. Client: {str(client)}. Error: {sql_error}")
 
-    logger.info(f"{bool(env_parameters['DRYRUN']) * '(DRYRUN) '}End of Client post action.")
-
-
-######################## Add debug loggers to each sql_cursor.execute() command
+    logger.info(f"End of adding new Client to Halo action.")
 
 
 

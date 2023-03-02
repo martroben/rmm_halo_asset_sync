@@ -10,7 +10,7 @@ from time import sleep
 
 
 def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
-                   exceptions: (Exception, tuple[Exception]) = Exception):
+                   exceptions: (Exception, tuple[Exception]) = Exception, log_name: str = "root"):
     """
     Retries the wrapped function. Meant to be used as a decorator.
     Parses the parameter 'log_name' from inner function and uses the logger with that name.
@@ -23,14 +23,26 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
     fatal: bool - If all retry attempts fail, the last exception is re-raised.
     """
     if function is None:
-        return partial(retry_function, times=times, interval_sec=interval_sec, exceptions=exceptions)
+        return partial(retry_function, times=times, interval_sec=interval_sec,
+                       exceptions=exceptions, log_name=log_name)
 
     @wraps(function)
     def retry(*args, **kwargs):
         attempt = 1
-        fatal = kwargs.get("fatal", False)              # True: re-raise last exception if all retry attempts fail.
-        log_name = kwargs.pop("log_name", "root")       # Get log name from wrapped function.
-        logger = logging.getLogger(log_name)            # Use root if no log name provided.
+        fatal = kwargs.get("fatal", False)
+        # ^ If True: re-raise last exception after all retry attempts fail.
+
+        # Parse log name, order of priority:
+        # 1. log_name variable in wrapped function arguments
+        # 2. log_name variable of instance whose function is wrapped (parsing from args[0], i.e. self)
+        # 3. log_name variable defined in decorator arguments
+        # 4. Default value root
+        secondary_log_name = log_name
+        if args:
+            secondary_log_name = getattr(args[0], "log_name", log_name)
+        primary_log_name = kwargs.pop("log_name", secondary_log_name)
+        logger = logging.getLogger(primary_log_name)
+
         while attempt <= times:
             try:
                 response = function(*args, **kwargs)
@@ -38,7 +50,7 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
                 if attempt < times:
                     log_string = f"Retrying function '{function.__name__}' in {round(interval_sec, 2)} seconds, " \
                                  f"because {type(exception).__name__} exception occurred. Attempt {attempt} of {times}."
-                    logger.info(log_string)
+                    logger.debug(log_string)
                     logger.debug(exception)
                     attempt += 1
                     sleep(interval_sec)
@@ -46,7 +58,7 @@ def retry_function(function=None, *, times: int = 3, interval_sec: float = 3.0,
                     log_string = f"Retrying function '{function.__name__}' failed after {times} attempts, " \
                                  f"because {type(exception).__name__} exception occurred."
                     logger.warning(log_string)
-                    logger.debug(exception)
+                    logger.warning(exception)
                     attempt += 1
                     if fatal:
                         raise exception
