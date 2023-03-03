@@ -19,6 +19,10 @@ import sql_operations
 ##################
 
 class Client:
+    """
+    Root class for Client objects.
+    Defines what variables should be used for comparing clients from different sources.
+    """
     comparison_variables = ["name"]
 
     def __eq__(self, other):
@@ -28,6 +32,11 @@ class Client:
 
 
 class NsightClient(Client):
+    """
+    Class for N-sight client objects.
+    Initiates from N-sight API Client xml.
+    Can output json payload for Halo Client post request.
+    """
     toplevel_id = ""
     halo_colour = "#a75ded"         # N-able purple to quickly distinguish Clients synced from N-sight
 
@@ -47,6 +56,10 @@ class NsightClient(Client):
 
 
 class HaloClient(Client):
+    """
+    Class for Halo client objects.
+    Initiates from Halo API Client json.
+    """
     def __init__(self, client):
         self.halo_id = client["id"]
         self.name = client["name"]
@@ -57,6 +70,10 @@ class HaloClient(Client):
 
 
 class HaloToplevel(Client):
+    """
+    Class for Halo toplevel objects. (One level above Clients.)
+    Initiates from Halo API Toplevel json.
+    """
     def __init__(self, toplevel):
         self.toplevel_id = toplevel["id"]
         self.name = toplevel["name"]
@@ -240,7 +257,7 @@ for client in missing_clients:
     backup_id = general.generate_random_hex(8)
 
     try:                                        # Only post if backup is successful
-        logger.debug(f"Backing up Client. Backup id: {backup_id}")
+        logger.info(f"Backing up Client. Backup id: {backup_id}")
         backup_data = json.dumps([client.get_post_payload()])
         sql_backup_table.insert(
             session_id=session_id,
@@ -270,7 +287,7 @@ for client in missing_clients:
     except sqlite3.Error as sql_error:         # Catch cases where Client is not posted, because backup action failed
         logger.warning(f"SQL error while adding new Client to Halo. Client: {str(client)}. Error: {sql_error}")
 
-    logger.info(f"End of adding new Client to Halo action.")
+    logger.debug(f"End of adding new Client to Halo action.")
 
 
 

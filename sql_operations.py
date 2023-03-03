@@ -80,11 +80,11 @@ class SqlInterface(ABC):
         sql_action = kwargs.pop("sql_action", "")
         arguments = ", ".join([argument for argument in args])
         keyword_arguments = ", ".join([f"{key}: {value}" for key, value in kwargs.items()])
-        logger.debug(f"SQL MOCK QUERY. Table: {self.name}. "
+        logger.debug(f"MOCK SQL QUERY. Table: {self.name}. "
                      f"Received action: {sql_action}. "
                      f"Received positional arguments: {arguments}. "
                      f"Received keyword arguments: {keyword_arguments}.")
-        logger.info("SQL MOCK QUERY. No action taken.")
+        logger.info("MOCK SQL QUERY. No action taken.")
 
 
 class SqlTableSessions(SqlInterface):
