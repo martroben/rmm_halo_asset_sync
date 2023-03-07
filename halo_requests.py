@@ -103,6 +103,26 @@ class HaloInterface:
 
         return response
 
+    def mock_request(self, *args, **kwargs) -> requests.Response:
+        """
+        Mock response generator. Used as replacement for editing actions in dryrun mode
+        :param kwargs: Normal request variables - included to debug log
+        :return: Mock response with status 201
+        """
+        logger = logging.getLogger(self.log_name)
+        logger.debug(get_log_string_mock_request(self.endpoint_url, **kwargs))
+        logger.info("MOCK HTTP REQUEST. No action taken.")
+
+        mock_responses.start()
+        mock_responses.add(            # Registers a mock response for the next request
+            mock_responses.POST,
+            re.compile(r".*"),
+            json={"response": "mock response"},
+            status=201)
+
+        response = requests.post(self.endpoint_url)
+        return response
+
     def get(self, session: HaloSession, parameters: dict, **kwargs) -> list[requests.Response]:
         """
         Wrapper for self.request. Does a GET request with pagination handled
@@ -158,26 +178,6 @@ class HaloInterface:
             method="post",
             json=json,
             **kwargs)
-        return response
-
-    def mock_request(self, *args, **kwargs) -> requests.Response:
-        """
-        Mock response generator. Used as replacement for editing actions in dryrun mode
-        :param kwargs: Normal request variables - included to debug log
-        :return: Mock response with status 201
-        """
-        logger = logging.getLogger(self.log_name)
-        logger.debug(get_log_string_mock_request(self.endpoint_url, **kwargs))
-        logger.info("MOCK HTTP REQUEST. No action taken.")
-
-        mock_responses.start()
-        mock_responses.add(            # Registers a mock response for the next request
-            mock_responses.POST,
-            re.compile(r".*"),
-            json={"response": "mock response"},
-            status=201)
-
-        response = requests.post(self.endpoint_url)
         return response
 
 
