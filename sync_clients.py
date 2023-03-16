@@ -8,78 +8,11 @@ import sqlite3
 # external
 import xml.etree.ElementTree as xml_ET      # xml parser
 # local
+import client_classes
 import general
 import halo_requests
 import nsight_requests
 import sql_operations
-
-
-##################
-# Client classes #
-##################
-
-class Client:
-    """
-    Root class for Client objects.
-    Defines what variables should be used for comparing clients from different sources.
-    """
-    comparison_variables = ["name"]
-
-    def __eq__(self, other):
-        matching_fields = [str(self.__getattribute__(variable)).lower() == str(other.__getattribute__(variable)).lower()
-                           for variable in self.comparison_variables]
-        return all(matching_fields)
-
-
-class NsightClient(Client):
-    """
-    Class for N-sight client objects.
-    Initiates from N-sight API Client xml.
-    Can output json payload for Halo Client post request.
-    """
-    toplevel_id = ""
-    halo_colour = "#a75ded"         # N-able purple to quickly distinguish Clients synced from N-sight
-
-    def __init__(self, client_xml):
-        self.nsight_id = client_xml.find("./clientid").text
-        self.name = client_xml.find("./name").text
-
-    def __repr__(self):
-        return f"{self.name} (N-sight id: {self.nsight_id})"
-
-    def get_post_payload(self):
-        payload = {
-            "name": self.name,
-            "toplevel_id": str(self.toplevel_id),
-            "colour": self.halo_colour}
-        return payload
-
-
-class HaloClient(Client):
-    """
-    Class for Halo client objects.
-    Initiates from Halo API Client json.
-    """
-    def __init__(self, client):
-        self.halo_id = client["id"]
-        self.name = client["name"]
-        self.toplevel_id = client["toplevel_id"]
-
-    def __repr__(self):
-        return f"{self.name} (Halo id: {self.halo_id})"
-
-
-class HaloToplevel(Client):
-    """
-    Class for Halo toplevel objects. (One level above Clients.)
-    Initiates from Halo API Toplevel json.
-    """
-    def __init__(self, toplevel):
-        self.toplevel_id = toplevel["id"]
-        self.name = toplevel["name"]
-
-    def __repr__(self):
-        return f"{self.name} (Toplevel id: {self.toplevel_id})"
 
 
 ###########################################
@@ -137,8 +70,9 @@ if ini_parameters["SQL_DATABASE_PATH"] != ":memory:":
 
 # Use in-memory SQL for dry-run
 sql_database_path = ":memory:" if env_parameters["DRYRUN"] else ini_parameters["SQL_DATABASE_PATH"]
-
 sql_connection = sqlite3.connect(sql_database_path)
+
+
 sql_sessions_table = sql_operations.SqlTableSessions(connection=sql_connection, log_name=log_name)
 sql_backup_table = sql_operations.SqlTableBackup(
     connection=sql_connection,
@@ -179,7 +113,7 @@ nsight_clients_response = nsight_requests.get_clients(
     fatal=False)                                        # Continue even if unable to retrieve N-sight clients
 
 nsight_clients_raw = xml_ET.fromstring(nsight_clients_response.text).findall("./items/client")
-nsight_clients = [NsightClient(client) for client in nsight_clients_raw]
+nsight_clients = [client_classes.NsightClient(client) for client in nsight_clients_raw]
 
 
 ####################
@@ -201,7 +135,7 @@ halo_clients_raw = halo_client_api.get_all(
     parameters=halo_client_parameters,
     fatal=True)             # Abort if a request fails, otherwise missing clients will be incorrectly determined
 
-halo_clients = [HaloClient(client) for client in halo_clients_raw]
+halo_clients = [client_classes.HaloClient(client) for client in halo_clients_raw]
 
 
 #######################################
@@ -224,7 +158,7 @@ if nsight_toplevel:
         session=halo_client_session,
         parameters=halo_toplevel_parameters)
 
-    halo_toplevels = [HaloToplevel(toplevel) for toplevel in halo_toplevels_raw]
+    halo_toplevels = [client_classes.HaloToplevel(toplevel) for toplevel in halo_toplevels_raw]
 
     nsight_toplevel_id = [toplevel.toplevel_id for toplevel in halo_toplevels if toplevel.name == nsight_toplevel][0]
     for client in nsight_clients:
@@ -232,7 +166,7 @@ if nsight_toplevel:
 
     # Add toplevel_id as a comparison variable for Client class
     # (only clients with matching toplevel_id's are counted as equal)
-    Client.comparison_variables += ["toplevel_id"]
+    client_classes.Client.comparison_variables += ["toplevel_id"]
 
 
 #################################
