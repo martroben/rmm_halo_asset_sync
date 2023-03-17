@@ -35,7 +35,6 @@ def create_table(table: str, columns: dict, connection: sqlite3.Connection) -> N
             {columns_string})
         """
     sql_cursor.execute(sql_statement)
-    print(sql_cursor.fetchall())
     connection.commit()
     return
 
@@ -194,13 +193,7 @@ def insert_row(table: str, connection: sqlite3.Connection, **kwargs) -> int:
     return sql_cursor.rowcount
 
 
-test_connection = get_connection(":memory:")
-create_table("test_table2", {"column1": "TEXT", "column2": "INTEGER"}, test_connection)
-insert_row("test_table", test_connection, column1="nimi", column2=11)
-update_row("test_table", test_connection, column1="teine_nimi", where=("column1 = ?", ("nimi",)))
-
-
-def update_row(table: str, connection: sqlite3.Connection, where: tuple = None, **kwargs) -> None:
+def update_rows(table: str, connection: sqlite3.Connection, where: tuple = None, **kwargs) -> int:
     """
     """
     sql_cursor = connection.cursor()
@@ -211,16 +204,28 @@ def update_row(table: str, connection: sqlite3.Connection, where: tuple = None, 
         column_values += (value,)
     column_assignments_string = ",".join(column_assignments)
 
-    values = column_values + where[1]
+    placeholder_values = column_values + where[1]
     sql_statement = f"""
         UPDATE {table}
         SET {column_assignments_string}
         WHERE {where[0]};
         """
-    sql_cursor.execute(sql_statement, values)
+    sql_cursor.execute(sql_statement, placeholder_values)
     connection.commit()
-    print("update rowcount: ", sql_cursor.rowcount)
-    return ############################### See if it's possible to get changed rows or smth
+    return sql_cursor.rowcount
+
+
+test_connection = sqlite3.connect(":memory:")
+test_table_dict = {"text_column": "TEXT", "integer_column": "INTEGER", "float_column": "FLOAT"}
+create_table("test_table", test_table_dict, test_connection)
+insert_row("test_table", test_connection, text_column="text1", integer_column=1)
+insert_row("test_table", test_connection, integer_column=2, float_column=3.4)
+insert_row("test_table", test_connection, text_column="text3", integer_column=1, float_column=5.6)
+update_row("test_table", test_connection, text_column="updated_text", where=("integer_column = ?", (1,)))
+cursor = test_connection.cursor()
+cursor.execute("SELECT * FROM test_table")
+cursor.fetchall()
+read_table("test_table", test_connection)
 
 
 class SqlInterface:
@@ -391,141 +396,141 @@ class SqlTableBackup(SqlInterface):
             post_successful=post_successful,
             log_name=self.log_name)
 
-
-def table_exists(table: str, connection: sqlite3.Connection, **kwargs) -> bool:
-    """
-    Check if table exists in SQLite.
-    :param table: Table name to search.
-    :param connection: SQL connection object.
-    :return: True/False whether the table exists
-    """
-    log_name = kwargs.pop("log_name", "root")       # Get log name.
-    logger = logging.getLogger(log_name)            # Use root if no log name provided.
-
-    check_table_query = f"SELECT EXISTS (SELECT name FROM sqlite_master WHERE type='table' AND name='{table}');"
-    sql_cursor = connection.cursor()
-    logger.debug(f"SQL query to execute: {check_table_query}")
-    query_result = sql_cursor.execute(check_table_query)
-    table_found = bool(query_result.fetchone()[0])
-    return table_found
-
-
-def create_table(table: str, columns: dict, connection: sqlite3.Connection, **kwargs) -> None:
-    """
-    Creates table in SQLite
-    :param table: table name
-    :param columns: A dict in the form of {column name: column type}
-    :param connection: SQL connection object.
-    :return: None
-    """
-    log_name = kwargs.pop("log_name", "root")       # Get log name.
-    logger = logging.getLogger(log_name)            # Use root if no log name provided.
-
-    columns_string = ",\n\t".join([f"{key} {value}" for key, value in columns.items()])
-    create_table_command = f"CREATE TABLE {table} (\n\t{columns_string}\n);"
-    sql_cursor = connection.cursor()
-    logger.debug(f"SQL query to execute: {create_table_command}")
-    sql_cursor.execute(create_table_command)
-    connection.commit()
-    return
-
-
-def read_table(table: str, connection: sqlite3.Connection, where: str = "", **kwargs) -> list[dict]:
-    """
-    Get data from a SQL table.
-    :param table: SQL table name.
-    :param connection: SQL connection.
-    :param where: Optional SQL WHERE filtering clause: e.g. "column = value" or "column IN (1,2,3)".
-    :return: A list of column_name:value dicts.
-    """
-    log_name = kwargs.pop("log_name", "root")       # Get log name.
-    logger = logging.getLogger(log_name)            # Use root if no log name provided.
-
-    where_statement = f" WHERE {where}" if where else ""
-    get_data_command = f"SELECT * FROM {table}{where_statement};"
-    sql_cursor = connection.cursor()
-    logger.debug(f"SQL query to execute: {get_data_command}")
-    response = sql_cursor.execute(get_data_command)
-    data = response.fetchall()
-    data_column_names = [item[0] for item in response.description]
-
-    data_rows = list()
-    for row in data:
-        data_row = {key: value for key, value in zip(data_column_names, row)}
-        data_rows += [data_row]
-    return data_rows
-
-
-def insert_row(table: str, connection: sqlite3.Connection, **kwargs) -> None:
-    """
-    Inserts a Listing to SQL table.
-    :param table: Name of SQL table where the data should be inserted to.
-    :param connection: SQL connection object.
-    :param kwargs: Key-value pairs to insert.
-    :return: None
-    """
-    log_name = kwargs.pop("log_name", "root")           # Get log name.
-    logger = logging.getLogger(log_name)                # Use root if no log name provided.
-
-    column_names = list()
-    values = list()
-    for column_name, value in kwargs.items():
-        column_names += [column_name]
-        if isinstance(value, str):
-            value = value.replace("'", "''")            # Change single quotes to double single quotes
-            value = f"'{value}'"                        # Add quotes to string variables
-        values += [str(value)]
-    column_names_string = ",".join(column_names)
-    values_string = ",".join(values)
-    insert_data_command = f"INSERT INTO {table} ({column_names_string})\n" \
-                          f"VALUES\n\t({values_string});"
-    sql_cursor = connection.cursor()
-    logger.debug(f"SQL query to execute: {insert_data_command}")
-    sql_cursor.execute(insert_data_command)
-    connection.commit()
-    return
-
-
-def update_row(column: str, value: str, table: str,
-               connection: sqlite3.Connection, where: str = "", **kwargs) -> None:
-    """
-    Sets the specified column value in SQL table.
-    :param table: Table name in SQL database.
-    :param connection: SLQ connection object.
-    :param column: Column/parameter to change in table.
-    :param value: Value to assign to the column.
-    :param where: SQL WHERE statement string.
-    :return: None
-    """
-    log_name = kwargs.pop("log_name", "root")           # Get log name.
-    logger = logging.getLogger(log_name)                # Use root if no log name provided.
-
-    where_statement = f" WHERE {where}" if where else ""
-    update_table_command = f"UPDATE {table} SET {column} = {value}{where_statement};"
-    sql_cursor = connection.cursor()
-    logger.debug(f"SQL query to execute: {update_table_command}")
-    sql_cursor.execute(update_table_command)
-    connection.commit()
-    return
-
-
-def get_table_info(table: str, connection: sqlite3.Connection, **kwargs) -> dict:
-    """
-    Get dict with basic table info
-    :param table: Table name in SQL database.
-    :param connection: SLQ connection object.
-    :return: Dict with values columns (column names and types) and n_rows.
-    """
-    log_name = kwargs.pop("log_name", "root")           # Get log name.
-    logger = logging.getLogger(log_name)                # Use root if no log name provided.
-
-    get_table_info_command = f"SELECT name, type FROM pragma_table_info('{table}');"
-    get_n_rows_command = f"SELECT COUNT(id) FROM {table};"
-    sql_cursor = connection.cursor()
-    logger.debug(f"SQL query to execute: {get_table_info_command}")
-    columns_response = sql_cursor.execute(get_table_info_command)
-    columns = [{"name": name, "type": column_type} for name, column_type in columns_response.fetchall()]
-    logger.debug(f"SQL query to execute: {get_n_rows_command}")
-    n_rows_response = sql_cursor.execute(get_n_rows_command)
-    n_rows = n_rows_response.fetchone()[0]
-    return {"columns": columns, "n_rows": n_rows}
+#
+# def table_exists(table: str, connection: sqlite3.Connection, **kwargs) -> bool:
+#     """
+#     Check if table exists in SQLite.
+#     :param table: Table name to search.
+#     :param connection: SQL connection object.
+#     :return: True/False whether the table exists
+#     """
+#     log_name = kwargs.pop("log_name", "root")       # Get log name.
+#     logger = logging.getLogger(log_name)            # Use root if no log name provided.
+#
+#     check_table_query = f"SELECT EXISTS (SELECT name FROM sqlite_master WHERE type='table' AND name='{table}');"
+#     sql_cursor = connection.cursor()
+#     logger.debug(f"SQL query to execute: {check_table_query}")
+#     query_result = sql_cursor.execute(check_table_query)
+#     table_found = bool(query_result.fetchone()[0])
+#     return table_found
+#
+#
+# def create_table(table: str, columns: dict, connection: sqlite3.Connection, **kwargs) -> None:
+#     """
+#     Creates table in SQLite
+#     :param table: table name
+#     :param columns: A dict in the form of {column name: column type}
+#     :param connection: SQL connection object.
+#     :return: None
+#     """
+#     log_name = kwargs.pop("log_name", "root")       # Get log name.
+#     logger = logging.getLogger(log_name)            # Use root if no log name provided.
+#
+#     columns_string = ",\n\t".join([f"{key} {value}" for key, value in columns.items()])
+#     create_table_command = f"CREATE TABLE {table} (\n\t{columns_string}\n);"
+#     sql_cursor = connection.cursor()
+#     logger.debug(f"SQL query to execute: {create_table_command}")
+#     sql_cursor.execute(create_table_command)
+#     connection.commit()
+#     return
+#
+#
+# def read_table(table: str, connection: sqlite3.Connection, where: str = "", **kwargs) -> list[dict]:
+#     """
+#     Get data from a SQL table.
+#     :param table: SQL table name.
+#     :param connection: SQL connection.
+#     :param where: Optional SQL WHERE filtering clause: e.g. "column = value" or "column IN (1,2,3)".
+#     :return: A list of column_name:value dicts.
+#     """
+#     log_name = kwargs.pop("log_name", "root")       # Get log name.
+#     logger = logging.getLogger(log_name)            # Use root if no log name provided.
+#
+#     where_statement = f" WHERE {where}" if where else ""
+#     get_data_command = f"SELECT * FROM {table}{where_statement};"
+#     sql_cursor = connection.cursor()
+#     logger.debug(f"SQL query to execute: {get_data_command}")
+#     response = sql_cursor.execute(get_data_command)
+#     data = response.fetchall()
+#     data_column_names = [item[0] for item in response.description]
+#
+#     data_rows = list()
+#     for row in data:
+#         data_row = {key: value for key, value in zip(data_column_names, row)}
+#         data_rows += [data_row]
+#     return data_rows
+#
+#
+# def insert_row(table: str, connection: sqlite3.Connection, **kwargs) -> None:
+#     """
+#     Inserts a Listing to SQL table.
+#     :param table: Name of SQL table where the data should be inserted to.
+#     :param connection: SQL connection object.
+#     :param kwargs: Key-value pairs to insert.
+#     :return: None
+#     """
+#     log_name = kwargs.pop("log_name", "root")           # Get log name.
+#     logger = logging.getLogger(log_name)                # Use root if no log name provided.
+#
+#     column_names = list()
+#     values = list()
+#     for column_name, value in kwargs.items():
+#         column_names += [column_name]
+#         if isinstance(value, str):
+#             value = value.replace("'", "''")            # Change single quotes to double single quotes
+#             value = f"'{value}'"                        # Add quotes to string variables
+#         values += [str(value)]
+#     column_names_string = ",".join(column_names)
+#     values_string = ",".join(values)
+#     insert_data_command = f"INSERT INTO {table} ({column_names_string})\n" \
+#                           f"VALUES\n\t({values_string});"
+#     sql_cursor = connection.cursor()
+#     logger.debug(f"SQL query to execute: {insert_data_command}")
+#     sql_cursor.execute(insert_data_command)
+#     connection.commit()
+#     return
+#
+#
+# def update_row(column: str, value: str, table: str,
+#                connection: sqlite3.Connection, where: str = "", **kwargs) -> None:
+#     """
+#     Sets the specified column value in SQL table.
+#     :param table: Table name in SQL database.
+#     :param connection: SLQ connection object.
+#     :param column: Column/parameter to change in table.
+#     :param value: Value to assign to the column.
+#     :param where: SQL WHERE statement string.
+#     :return: None
+#     """
+#     log_name = kwargs.pop("log_name", "root")           # Get log name.
+#     logger = logging.getLogger(log_name)                # Use root if no log name provided.
+#
+#     where_statement = f" WHERE {where}" if where else ""
+#     update_table_command = f"UPDATE {table} SET {column} = {value}{where_statement};"
+#     sql_cursor = connection.cursor()
+#     logger.debug(f"SQL query to execute: {update_table_command}")
+#     sql_cursor.execute(update_table_command)
+#     connection.commit()
+#     return
+#
+#
+# def get_table_info(table: str, connection: sqlite3.Connection, **kwargs) -> dict:
+#     """
+#     Get dict with basic table info
+#     :param table: Table name in SQL database.
+#     :param connection: SLQ connection object.
+#     :return: Dict with values columns (column names and types) and n_rows.
+#     """
+#     log_name = kwargs.pop("log_name", "root")           # Get log name.
+#     logger = logging.getLogger(log_name)                # Use root if no log name provided.
+#
+#     get_table_info_command = f"SELECT name, type FROM pragma_table_info('{table}');"
+#     get_n_rows_command = f"SELECT COUNT(id) FROM {table};"
+#     sql_cursor = connection.cursor()
+#     logger.debug(f"SQL query to execute: {get_table_info_command}")
+#     columns_response = sql_cursor.execute(get_table_info_command)
+#     columns = [{"name": name, "type": column_type} for name, column_type in columns_response.fetchall()]
+#     logger.debug(f"SQL query to execute: {get_n_rows_command}")
+#     n_rows_response = sql_cursor.execute(get_n_rows_command)
+#     n_rows = n_rows_response.fetchone()[0]
+#     return {"columns": columns, "n_rows": n_rows}
