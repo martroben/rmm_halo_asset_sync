@@ -166,9 +166,10 @@ def read_table(table: str, connection: sqlite3.Connection, where: tuple = None) 
     return data_rows
 
 
-def insert_row(table: str, connection: sqlite3.Connection, **kwargs) -> int:
+def insert_row(table: str, connection: sqlite3.Connection, dryrun: bool = False, **kwargs) -> int:
     """
     Inserts a single row to a SQLite table
+    :param dryrun:
     :param table: Name of the table to insert to
     :param connection: SQLite connection object
     :param kwargs: Key-value (column name: value) pairs to insert
@@ -187,14 +188,20 @@ def insert_row(table: str, connection: sqlite3.Connection, **kwargs) -> int:
         VALUES
             ({placeholder_string});
         """
+    if dryrun: ############################## add test for dryrun
+        logger = logging.getLogger(os.getenv("LOGGER_NAME"))
+        logger.info(sql_statement)
+        return 0
     sql_cursor = connection.cursor()
     sql_cursor.execute(sql_statement, values)
     connection.commit()
     return sql_cursor.rowcount
 
 
-def update_rows(table: str, connection: sqlite3.Connection, where: tuple = None, **kwargs) -> int:
+def update_rows(table: str, connection: sqlite3.Connection,
+                where: tuple = None, dryrun: bool = False, **kwargs) -> int:
     """
+    Returns number of changed rows.
     """
     sql_cursor = connection.cursor()
     column_assignments = list()
@@ -210,35 +217,56 @@ def update_rows(table: str, connection: sqlite3.Connection, where: tuple = None,
         SET {column_assignments_string}
         WHERE {where[0]};
         """
+    if dryrun:
+        logger = logging.getLogger(os.getenv("LOGGER_NAME"))
+        logger.info(sql_statement)
+        return 0
     sql_cursor.execute(sql_statement, placeholder_values)
     connection.commit()
     return sql_cursor.rowcount
 
 
-test_connection = sqlite3.connect(":memory:")
-test_table_dict = {"text_column": "TEXT", "integer_column": "INTEGER", "float_column": "FLOAT"}
-create_table("test_table", test_table_dict, test_connection)
-insert_row("test_table", test_connection, text_column="text1", integer_column=1)
-insert_row("test_table", test_connection, integer_column=2, float_column=3.4)
-insert_row("test_table", test_connection, text_column="text3", integer_column=1, float_column=5.6)
-update_row("test_table", test_connection, text_column="updated_text", where=("integer_column = ?", (1,)))
-cursor = test_connection.cursor()
-cursor.execute("SELECT * FROM test_table")
-cursor.fetchall()
-read_table("test_table", test_connection)
+def get_columns(table: str, connection: sqlite3.Connection) -> dict:
+    """
+    """
+    sql_cursor = connection.cursor()
+    column_types_sql_statement = f"PRAGMA table_info({table})"
+    # Gives tuples where 2nd and 3rd element is column name and type
+    column_types_response = sql_cursor.execute(column_types_sql_statement)
+    columns = {column[1]: column[2] for column in column_types_response.fetchall()}
+    return columns
+
+
+def get_n_rows(table: str, connection: sqlite3.Connection) -> int:
+    """
+    :param table:
+    :param connection:
+    :return:
+    """
+    sql_cursor = connection.cursor()
+    n_rows_sql_statement = f"SELECT COUNT(*) FROM {table}"
+    n_rows_response = sql_cursor.execute(n_rows_sql_statement)
+    n_rows = n_rows_response.fetchone()[0]
+    return n_rows
 
 
 class SqlInterface:
+    default_columns = dict()
 
-    def __init__(self, path: str, table: str, columns: dict, log_name: str, dryrun: bool):
+    def __init__(self, path: str, table: str, log_name: str, dryrun: bool):
         self.table = table
-        self.columns = columns
         self.logger = logging.getLogger(log_name)
         self.dryrun = dryrun
 
-        ################################### catch connection error
+        ################################### catch connection error: sqlite3.OperationalError: unable to open database file
         self.connection = get_connection(path)
-        ################################### catch operation error
+        ################################### catch operation error: sqlite3.OperationalError: near "&": syntax error
+
+    def create_table(self, columns: dict = None):
+        ################################# test if table already exists
+        ################################## operational error (try closed conenction)?
+        if not columns:
+            columns = self.default_columns
         create_table(
             table=self.table,
             columns={column_name: get_sql_type(column_type) for column_name, column_type in columns.items()},
@@ -251,17 +279,16 @@ class SqlInterface:
         :param where: "where"-statements. A single string or a list of strings. E.g. "WHERE column1 != 'red'"
         :return: Selected data
         """
-        if where:  # Parse where inputs
+        if where:                           # Parse where inputs
             where = [where] if not isinstance(where, list) else where  # Make sure where variable is a list
             where_parsed = [parse_where_parameter(parameter) for parameter in where]
             where_statement, where_values = compile_where_statement(where_parsed)
             where = (where_statement, where_values)
-        # Read
-        result = read_table(
+        selected_data = read_table(                # Read
             table=self.table,
             connection=self.connection,
             where=where)
-        return result
+        return selected_data
 
     def insert(self, **kwargs) -> int:
         """Insert a row to the table. Returns the number of rows inserted (0 or 1)"""
@@ -271,20 +298,26 @@ class SqlInterface:
             **kwargs)
         return n_rows_inserted
 
-    def update(self, column: str, value, where: (str | list[str]) = None):
+    def update(self, where: (str | list[str]) = None, **kwargs):
+        """
+        Column name - value pairs that are to be changed.
+        :param where:
+        :param kwargs:
+        :return:
+        """
         if where:  # Parse where inputs
             where = [where] if not isinstance(where, list) else where  # Make sure where variable is a list
             where_parsed = [parse_where_parameter(parameter) for parameter in where]
             where_statement, where_values = compile_where_statement(where_parsed)
             where = (where_statement, where_values)
-
-        update_row(
-            column=column,
-            value=value,
-            table=self.name,
+        n_rows_changed = update_rows(
+            table=self.table,
             connection=self.connection,
             where=where,
-            log_name=self.log_name)
+            **kwargs)
+        return n_rows_changed
+
+
 
 
 
@@ -348,6 +381,7 @@ class SqlInterface:
 
 class SqlTableSessions(SqlInterface):
     name = "sessions"
+    # rename to default_columns (can be just a connection to table that has different columns)
     columns = {
         "session_id": "TEXT",
         "time_unix": "INTEGER",
@@ -359,6 +393,7 @@ class SqlTableSessions(SqlInterface):
 
 class SqlTableBackup(SqlInterface):
     name = "backup"
+    # rename to default_columns (can be just a connection to table that has different columns)
     columns = {
         "session_id": "TEXT",
         "backup_id": "TEXT",
