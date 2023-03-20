@@ -11,33 +11,35 @@ import xml.etree.ElementTree as xml_ET      # xml parser
 import client_classes
 import general
 import halo_requests
+import log
 import nsight_requests
-import sql_operations
+from sql_operations import SqlTableBackup, SqlTableSessions
 
 
 ###########################################
 # Import environmental / config variables #
 ###########################################
 
-env_file_path = ".env"
 ini_file_path = ".ini"
+ini_parameters = general.parse_input_file(ini_file_path)
 
+env_file_path = ".env"
 general.parse_input_file(
     env_file_path,
     parse_values=False,
     set_environmental_variables=True)
+DRYRUN = bool(int(os.getenv("DRYRUN", 1)))
 
-ini_parameters = general.parse_input_file(ini_file_path)
-env_parameters = {
-    "HALO_API_URL": os.environ["HALO_API_URL"],
-    "HALO_API_AUTHENTICATION_URL": os.environ["HALO_API_AUTHENTICATION_URL"],
-    "HALO_API_TENANT": os.environ["HALO_API_TENANT"],
-    "HALO_API_CLIENT_ID": os.environ["HALO_API_CLIENT_ID"],
-    "HALO_API_CLIENT_SECRET": os.environ["HALO_API_CLIENT_SECRET"],
-    "NSIGHT_BASE_URL": os.environ["NSIGHT_BASE_URL"],
-    "NSIGHT_API_KEY": os.environ["NSIGHT_API_KEY"],
-    "DRYRUN": int(os.environ["DRYRUN"])
-}
+required_env_variables = [
+    "HALO_API_URL",
+    "HALO_API_AUTHENTICATION_URL",
+    "HALO_API_TENANT",
+    "HALO_API_CLIENT_ID",
+    "HALO_API_CLIENT_SECRET",
+    "NSIGHT_BASE_URL",
+    "NSIGHT_API_KEY"]
+
+missing_env_variables = [variable for variable in required_env_variables if os.getenv(variable, None) is None]
 
 
 ###############
@@ -45,39 +47,23 @@ env_parameters = {
 ###############
 
 session_id = general.generate_random_hex(8)
-
-log_name = "clients"
-logger = logging.getLogger(log_name)
-logger.setLevel(ini_parameters["LOG_LEVEL"].upper())
-handler = logging.StreamHandler()
-formatter = logging.Formatter(
-    fmt=f"{{asctime}} | {session_id} | {{funcName}} | "
-        f"{{levelname}}: {bool(env_parameters['DRYRUN'])*'(DRYRUN) '}{{message}}",
-    datefmt="%m/%d/%Y %H:%M:%S",
-    style="{")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+logger = log.setup_logger(
+    name=ini_parameters["LOGGER_NAME"],
+    level=ini_parameters["LOG_LEVEL"],
+    indicator=ini_parameters["LOG_STRING_INDICATOR"],
+    session_id=session_id,
+    dryrun=DRYRUN)
 
 
 #############
 # Setup SQL #
-#############
-
-# Create directories for database if they don't exist
-if ini_parameters["SQL_DATABASE_PATH"] != ":memory:":
-    if not os.path.exists(os.path.dirname(ini_parameters["SQL_DATABASE_PATH"])):
-        os.makedirs(os.path.dirname(ini_parameters["SQL_DATABASE_PATH"]))
+#############   ################################ tests
 
 # Use in-memory SQL for dry-run
-sql_database_path = ":memory:" if env_parameters["DRYRUN"] else ini_parameters["SQL_DATABASE_PATH"]
-sql_connection = sqlite3.connect(sql_database_path)
+sql_database_path = ":memory:" if DRYRUN else ini_parameters["SQL_DATABASE_PATH"]
 
-
-sql_sessions_table = sql_operations.SqlTableSessions(connection=sql_connection, log_name=log_name)
-sql_backup_table = sql_operations.SqlTableBackup(
-    connection=sql_connection,
-    active=ini_parameters["BACKUP_ACTIVE"],
-    log_name=log_name)
+sql_sessions_table = SqlTableSessions(sql_database_path)
+sql_backup_table = SqlTableBackup(sql_database_path)
 
 # Insert session info to SQL
 sql_sessions_table.insert(
@@ -165,7 +151,7 @@ if nsight_toplevel:
         client.toplevel_id = nsight_toplevel_id
 
     # Add toplevel_id as a comparison variable for Client class
-    # (only clients with matching toplevel_id's are counted as equal)
+    # (only Clients with matching toplevel_id's are counted as equal)
     client_classes.Client.comparison_variables += ["toplevel_id"]
 
 
