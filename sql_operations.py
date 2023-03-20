@@ -1,6 +1,5 @@
 
 # standard
-import logging
 import os
 import re
 import sqlite3
@@ -30,12 +29,8 @@ def create_table(table: str, columns: dict, connection: sqlite3.Connection) -> N
     """
     sql_cursor = connection.cursor()
     columns_string = ",".join([f"{key} {value}" for key, value in columns.items()])
-    sql_statement = f"""
-        CREATE TABLE IF NOT EXISTS {table} (
-            {columns_string})
-        """
+    sql_statement = f"CREATE TABLE IF NOT EXISTS {table} ({columns_string})"
     sql_cursor.execute(sql_statement)
-    connection.commit()
     return
 
 
@@ -166,10 +161,9 @@ def read_table(table: str, connection: sqlite3.Connection, where: tuple = None) 
     return data_rows
 
 
-def insert_row(table: str, connection: sqlite3.Connection, dryrun: bool = False, **kwargs) -> int:
+def insert_row(table: str, connection: sqlite3.Connection, **kwargs) -> int:
     """
     Inserts a single row to a SQLite table
-    :param dryrun:
     :param table: Name of the table to insert to
     :param connection: SQLite connection object
     :param kwargs: Key-value (column name: value) pairs to insert
@@ -188,18 +182,12 @@ def insert_row(table: str, connection: sqlite3.Connection, dryrun: bool = False,
         VALUES
             ({placeholder_string});
         """
-    if dryrun: ############################## add test for dryrun
-        logger = logging.getLogger(os.getenv("LOGGER_NAME"))
-        logger.info(sql_statement)
-        return 0
     sql_cursor = connection.cursor()
     sql_cursor.execute(sql_statement, values)
-    connection.commit()
     return sql_cursor.rowcount
 
 
-def update_rows(table: str, connection: sqlite3.Connection,
-                where: tuple = None, dryrun: bool = False, **kwargs) -> int:
+def update_rows(table: str, connection: sqlite3.Connection, where: tuple = None, **kwargs) -> int:
     """
     Returns number of changed rows.
     """
@@ -217,60 +205,53 @@ def update_rows(table: str, connection: sqlite3.Connection,
         SET {column_assignments_string}
         WHERE {where[0]};
         """
-    if dryrun:
-        logger = logging.getLogger(os.getenv("LOGGER_NAME"))
-        logger.info(sql_statement)
-        return 0
     sql_cursor.execute(sql_statement, placeholder_values)
     connection.commit()
     return sql_cursor.rowcount
 
 
-def get_columns(table: str, connection: sqlite3.Connection) -> dict:
+def get_columns_types(table: str, connection: sqlite3.Connection) -> dict:
     """
+    Gives {column name: column SQLite type}
     """
     sql_cursor = connection.cursor()
-    column_types_sql_statement = f"PRAGMA table_info({table})"
+    sql_statement = f"PRAGMA table_info({table})"
     # Gives tuples where 2nd and 3rd element is column name and type
-    column_types_response = sql_cursor.execute(column_types_sql_statement)
-    columns = {column[1]: column[2] for column in column_types_response.fetchall()}
+    response = sql_cursor.execute(sql_statement)
+    columns = {column_info[1]: column_info[2] for column_info in response.fetchall()}
     return columns
 
 
-def get_n_rows(table: str, connection: sqlite3.Connection) -> int:
+def count_rows(table: str, connection: sqlite3.Connection) -> int:
     """
+    Get the number of rows a table has.
     :param table:
     :param connection:
     :return:
     """
     sql_cursor = connection.cursor()
-    n_rows_sql_statement = f"SELECT COUNT(*) FROM {table}"
-    n_rows_response = sql_cursor.execute(n_rows_sql_statement)
-    n_rows = n_rows_response.fetchone()[0]
+    sql_statement = f"SELECT COUNT(*) FROM {table}"
+    response = sql_cursor.execute(sql_statement)
+    n_rows = response.fetchone()[0]
     return n_rows
 
 
 class SqlInterface:
-    default_columns = dict()
-
-    def __init__(self, path: str, table: str, log_name: str, dryrun: bool):
+    def __init__(self, path: str, table: str, columns: dict):
         self.table = table
-        self.logger = logging.getLogger(log_name)
-        self.dryrun = dryrun
-
-        ################################### catch connection error: sqlite3.OperationalError: unable to open database file
+        self.columns = columns
         self.connection = get_connection(path)
-        ################################### catch operation error: sqlite3.OperationalError: near "&": syntax error
+        self.create_table()
 
-    def create_table(self, columns: dict = None):
-        ################################# test if table already exists
-        ################################## operational error (try closed conenction)?
-        if not columns:
-            columns = self.default_columns
+    def __repr__(self):
+        return str(self.info())
+
+    def create_table(self):
         create_table(
             table=self.table,
-            columns={column_name: get_sql_type(column_type) for column_name, column_type in columns.items()},
+            columns=self.columns,
             connection=self.connection)
+        self.connection.commit()
 
     def select(self, where: (str | list[str]) = None) -> list[dict]:
         """
@@ -279,12 +260,14 @@ class SqlInterface:
         :param where: "where"-statements. A single string or a list of strings. E.g. "WHERE column1 != 'red'"
         :return: Selected data
         """
-        if where:                           # Parse where inputs
-            where = [where] if not isinstance(where, list) else where  # Make sure where variable is a list
+        # Parse where inputs
+        if where:
+            where = [where] if not isinstance(where, list) else where       # Make sure where variable is a list
             where_parsed = [parse_where_parameter(parameter) for parameter in where]
             where_statement, where_values = compile_where_statement(where_parsed)
             where = (where_statement, where_values)
-        selected_data = read_table(                # Read
+        # Read
+        selected_data = read_table(
             table=self.table,
             connection=self.connection,
             where=where)
@@ -292,10 +275,11 @@ class SqlInterface:
 
     def insert(self, **kwargs) -> int:
         """Insert a row to the table. Returns the number of rows inserted (0 or 1)"""
-        n_rows_inserted = insert_row(           ########################## Add logic to log drylog actions
+        n_rows_inserted = insert_row(
             table=self.table,
             connection=self.connection,
             **kwargs)
+        self.connection.commit()
         return n_rows_inserted
 
     def update(self, where: (str | list[str]) = None, **kwargs):
@@ -305,84 +289,33 @@ class SqlInterface:
         :param kwargs:
         :return:
         """
-        if where:  # Parse where inputs
+        # Parse where inputs
+        if where:
             where = [where] if not isinstance(where, list) else where  # Make sure where variable is a list
             where_parsed = [parse_where_parameter(parameter) for parameter in where]
             where_statement, where_values = compile_where_statement(where_parsed)
             where = (where_statement, where_values)
+        # Update
         n_rows_changed = update_rows(
             table=self.table,
             connection=self.connection,
             where=where,
             **kwargs)
+        self.connection.commit()
         return n_rows_changed
 
-
-
-
-
-    def check(self) -> None:
-        if not table_exists(self.name, self.connection):
-            create_table(
-                table=self.name,
-                columns=self.columns,
-                connection=self.connection,
-                log_name=self.log_name)
-        if not table_exists(table=self.name, connection=self.connection, log_name=self.log_name):
-            error_string = f"SQL table not created. Table: '{self.name}'."
-            raise self.connection.Error(error_string)
-
-    def read(self, where: str = "") -> list[dict]:
-        result = read_table(
-            table=self.name,
-            connection=self.connection,
-            where=where,
-            log_name=self.log_name)
-        return result
-
-    def insert(self, **kwargs) -> None:
-        insert_row(
-            table=self.name,
-            connection=self.connection,
-            log_name=self.log_name,
-            **kwargs)
-
-    def update(self, column: str, value: (int, float, str, bool), where: str = "") -> None:
-        update_row(
-            column=column,
-            value=value,
-            table=self.name,
-            connection=self.connection,
-            where=where,
-            log_name=self.log_name)
-
-    def info(self) -> dict:
-        if not self.active:
-            return {"active": 0}
-        result = get_table_info(
-            table=self.name,
-            connection=self.connection,
-            log_name=self.log_name)
-        result["active"] = 1
-        return result
-
-    def mock_query(self, *args, **kwargs) -> None:
-        logger = logging.getLogger(self.log_name)
-
-        sql_action = kwargs.pop("sql_action", "")
-        arguments = ", ".join([argument for argument in args])
-        keyword_arguments = ", ".join([f"{key}: {value}" for key, value in kwargs.items()])
-        logger.debug(f"MOCK SQL QUERY. Table: {self.name}. "
-                     f"Received action: {sql_action}. "
-                     f"Received positional arguments: {arguments}. "
-                     f"Received keyword arguments: {keyword_arguments}.")
-        logger.info("MOCK SQL QUERY. No action taken.")
+    def info(self):
+        """
+        :return: {"n_rows": 5, "columns": {"column1": "INTEGER", "column2": "FLOAT", ...}}
+        """
+        columns_types = get_columns_types(self.table, self.connection)
+        n_rows = count_rows(self.table, self.connection)
+        return {"n_rows": n_rows, "columns": columns_types}
 
 
 class SqlTableSessions(SqlInterface):
-    name = "sessions"
-    # rename to default_columns (can be just a connection to table that has different columns)
-    columns = {
+    default_table = "sessions"
+    default_columns = {
         "session_id": "TEXT",
         "time_unix": "INTEGER",
         "status": "TEXT",
@@ -390,182 +323,42 @@ class SqlTableSessions(SqlInterface):
         "sites_synced": "INTEGER",
         "assets_synced": "INTEGER"}
 
+    def __init__(self, path: str):
+        super().__init__(path, table=self.default_table, columns=self.default_columns)
+
 
 class SqlTableBackup(SqlInterface):
-    name = "backup"
-    # rename to default_columns (can be just a connection to table that has different columns)
-    columns = {
+    default_table = "backup"
+    default_columns = {
         "session_id": "TEXT",
         "backup_id": "TEXT",
         "action": "TEXT",
         "old": "TEXT",
         "new": "TEXT",
         "post_successful": "INTEGER"}
-    backup_actions = ["insert", "update", "remove"]
+    allowed_backup_actions = ["insert", "update", "remove"]
+
+    def __init__(self, path: str):
+        super().__init__(path, table=self.default_table, columns=self.default_columns)
 
     def insert(self, session_id: str, backup_id: str, action: str, old: str, new: str,
-               post_successful: (bool, int), **kwargs) -> None:
+               post_successful: (bool, int)) -> None:
         """
         Function to enter row to SQL backup table with structured parameters.
-
         :param session_id: Session id, hexadecimal string
         :param backup_id: Id of the specific backup row. Hexadecimal string
         :param action: Backup action type (e.g. insert, remove...)
         :param old: Old value that can be restored
         :param new: New value to recognize what was changed
         :param post_successful: Indication that the backed up change was successfully posted to Halo
-        :param kwargs: Needs free arguments to provide log_name to mock insert function.
         :return: None
         """
-        if action not in self.backup_actions:
-            raise sqlite3.Error(f"Not a valid backup action: '{action}'. "
-                                f"Allowed actions: {', '.join(self.backup_actions)}.")
         insert_row(
-            table=self.name,
+            table=self.table,
             connection=self.connection,
             session_id=session_id,
             backup_id=backup_id,
-            action=action,
+            action=action.lower(),
             old=old,
             new=new,
-            post_successful=post_successful,
-            log_name=self.log_name)
-
-#
-# def table_exists(table: str, connection: sqlite3.Connection, **kwargs) -> bool:
-#     """
-#     Check if table exists in SQLite.
-#     :param table: Table name to search.
-#     :param connection: SQL connection object.
-#     :return: True/False whether the table exists
-#     """
-#     log_name = kwargs.pop("log_name", "root")       # Get log name.
-#     logger = logging.getLogger(log_name)            # Use root if no log name provided.
-#
-#     check_table_query = f"SELECT EXISTS (SELECT name FROM sqlite_master WHERE type='table' AND name='{table}');"
-#     sql_cursor = connection.cursor()
-#     logger.debug(f"SQL query to execute: {check_table_query}")
-#     query_result = sql_cursor.execute(check_table_query)
-#     table_found = bool(query_result.fetchone()[0])
-#     return table_found
-#
-#
-# def create_table(table: str, columns: dict, connection: sqlite3.Connection, **kwargs) -> None:
-#     """
-#     Creates table in SQLite
-#     :param table: table name
-#     :param columns: A dict in the form of {column name: column type}
-#     :param connection: SQL connection object.
-#     :return: None
-#     """
-#     log_name = kwargs.pop("log_name", "root")       # Get log name.
-#     logger = logging.getLogger(log_name)            # Use root if no log name provided.
-#
-#     columns_string = ",\n\t".join([f"{key} {value}" for key, value in columns.items()])
-#     create_table_command = f"CREATE TABLE {table} (\n\t{columns_string}\n);"
-#     sql_cursor = connection.cursor()
-#     logger.debug(f"SQL query to execute: {create_table_command}")
-#     sql_cursor.execute(create_table_command)
-#     connection.commit()
-#     return
-#
-#
-# def read_table(table: str, connection: sqlite3.Connection, where: str = "", **kwargs) -> list[dict]:
-#     """
-#     Get data from a SQL table.
-#     :param table: SQL table name.
-#     :param connection: SQL connection.
-#     :param where: Optional SQL WHERE filtering clause: e.g. "column = value" or "column IN (1,2,3)".
-#     :return: A list of column_name:value dicts.
-#     """
-#     log_name = kwargs.pop("log_name", "root")       # Get log name.
-#     logger = logging.getLogger(log_name)            # Use root if no log name provided.
-#
-#     where_statement = f" WHERE {where}" if where else ""
-#     get_data_command = f"SELECT * FROM {table}{where_statement};"
-#     sql_cursor = connection.cursor()
-#     logger.debug(f"SQL query to execute: {get_data_command}")
-#     response = sql_cursor.execute(get_data_command)
-#     data = response.fetchall()
-#     data_column_names = [item[0] for item in response.description]
-#
-#     data_rows = list()
-#     for row in data:
-#         data_row = {key: value for key, value in zip(data_column_names, row)}
-#         data_rows += [data_row]
-#     return data_rows
-#
-#
-# def insert_row(table: str, connection: sqlite3.Connection, **kwargs) -> None:
-#     """
-#     Inserts a Listing to SQL table.
-#     :param table: Name of SQL table where the data should be inserted to.
-#     :param connection: SQL connection object.
-#     :param kwargs: Key-value pairs to insert.
-#     :return: None
-#     """
-#     log_name = kwargs.pop("log_name", "root")           # Get log name.
-#     logger = logging.getLogger(log_name)                # Use root if no log name provided.
-#
-#     column_names = list()
-#     values = list()
-#     for column_name, value in kwargs.items():
-#         column_names += [column_name]
-#         if isinstance(value, str):
-#             value = value.replace("'", "''")            # Change single quotes to double single quotes
-#             value = f"'{value}'"                        # Add quotes to string variables
-#         values += [str(value)]
-#     column_names_string = ",".join(column_names)
-#     values_string = ",".join(values)
-#     insert_data_command = f"INSERT INTO {table} ({column_names_string})\n" \
-#                           f"VALUES\n\t({values_string});"
-#     sql_cursor = connection.cursor()
-#     logger.debug(f"SQL query to execute: {insert_data_command}")
-#     sql_cursor.execute(insert_data_command)
-#     connection.commit()
-#     return
-#
-#
-# def update_row(column: str, value: str, table: str,
-#                connection: sqlite3.Connection, where: str = "", **kwargs) -> None:
-#     """
-#     Sets the specified column value in SQL table.
-#     :param table: Table name in SQL database.
-#     :param connection: SLQ connection object.
-#     :param column: Column/parameter to change in table.
-#     :param value: Value to assign to the column.
-#     :param where: SQL WHERE statement string.
-#     :return: None
-#     """
-#     log_name = kwargs.pop("log_name", "root")           # Get log name.
-#     logger = logging.getLogger(log_name)                # Use root if no log name provided.
-#
-#     where_statement = f" WHERE {where}" if where else ""
-#     update_table_command = f"UPDATE {table} SET {column} = {value}{where_statement};"
-#     sql_cursor = connection.cursor()
-#     logger.debug(f"SQL query to execute: {update_table_command}")
-#     sql_cursor.execute(update_table_command)
-#     connection.commit()
-#     return
-#
-#
-# def get_table_info(table: str, connection: sqlite3.Connection, **kwargs) -> dict:
-#     """
-#     Get dict with basic table info
-#     :param table: Table name in SQL database.
-#     :param connection: SLQ connection object.
-#     :return: Dict with values columns (column names and types) and n_rows.
-#     """
-#     log_name = kwargs.pop("log_name", "root")           # Get log name.
-#     logger = logging.getLogger(log_name)                # Use root if no log name provided.
-#
-#     get_table_info_command = f"SELECT name, type FROM pragma_table_info('{table}');"
-#     get_n_rows_command = f"SELECT COUNT(id) FROM {table};"
-#     sql_cursor = connection.cursor()
-#     logger.debug(f"SQL query to execute: {get_table_info_command}")
-#     columns_response = sql_cursor.execute(get_table_info_command)
-#     columns = [{"name": name, "type": column_type} for name, column_type in columns_response.fetchall()]
-#     logger.debug(f"SQL query to execute: {get_n_rows_command}")
-#     n_rows_response = sql_cursor.execute(get_n_rows_command)
-#     n_rows = n_rows_response.fetchone()[0]
-#     return {"columns": columns, "n_rows": n_rows}
+            post_successful=post_successful)

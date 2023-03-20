@@ -1,5 +1,7 @@
 
+# standard
 import sqlite3
+# local
 import sql_operations
 
 
@@ -87,19 +89,43 @@ def test_update_rows_null_changed_rows():
     assert n_updated_rows == 0
 
 
-test_connection = sqlite3.connect(":memory:")
-sql_operations.create_table("test_table", create_table_dict, test_connection)
-sql_operations.insert_row("test_table", test_connection, **insert_row_dict1)
-sql_operations.insert_row("test_table", test_connection, **insert_row_dict2)
-sql_operations.insert_row("test_table", test_connection, **insert_row_dict3)
+def test_column_info():
+    test_connection = sqlite3.connect(":memory:")
+    sql_operations.create_table("test_table", create_table_dict, test_connection)
+    sql_operations.insert_row("test_table", test_connection, **insert_row_dict1)
+    sql_operations.insert_row("test_table", test_connection, **insert_row_dict2)
+    sql_operations.insert_row("test_table", test_connection, **insert_row_dict3)
+
+    expected_result = {
+        "text_column": "TEXT",
+        "integer_column": "INTEGER",
+        "float_column": "FLOAT"}
+
+    received_result = sql_operations.get_columns_types("test_table", test_connection)
+    assert received_result == expected_result
 
 
+def test_column_info_nonexisting_table():
+    test_connection = sqlite3.connect(":memory:")
+    result = sql_operations.get_columns_types("nonexisting_table", test_connection)
+    assert result == {}
 
-cursor = test_connection.cursor()
-sql_statement = f"PRAGMA table_info(test_table)"
-response = cursor.execute(sql_statement)
-response.fetchall()
-sql_statement2 = f"SELECT COUNT(*) FROM test_table;"
-response2 = cursor.execute(sql_statement2)
-response2.fetchone()[0]
+
+def test_row_count():
+    test_connection = sqlite3.connect(":memory:")
+    sql_operations.create_table("test_table", create_table_dict, test_connection)
+    sql_operations.insert_row("test_table", test_connection, **insert_row_dict1)
+    sql_operations.insert_row("test_table", test_connection, **insert_row_dict2)
+    sql_operations.insert_row("test_table", test_connection, **insert_row_dict3)
+
+    n_rows = sql_operations.count_rows("test_table", test_connection)
+    assert n_rows == 3
+
+
+def test_row_count_nonexisting_table():
+    test_connection = sqlite3.connect(":memory:")
+    n_rows = sql_operations.count_rows("nonexisting_table", test_connection)
+    assert n_rows == 0
+
+
 
