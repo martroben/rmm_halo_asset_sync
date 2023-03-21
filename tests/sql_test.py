@@ -1,5 +1,6 @@
 
 # standard
+import pytest
 import sqlite3
 # local
 import sql_operations
@@ -128,4 +129,55 @@ def test_row_count_nonexisting_table():
     assert n_rows == 0
 
 
+def test_sessions_table():
+    sessions_table = sql_operations.SqlTableSessions(":memory:")
+    assert sessions_table.info()["columns"] == sessions_table.default_columns
 
+
+def test_backup_table():
+    backup_table = sql_operations.SqlTableBackup(":memory:")
+    assert backup_table.info()["columns"] == backup_table.default_columns
+
+
+def test_backup_table_insert():
+    backup_table = sql_operations.SqlTableBackup(":memory:")
+    backup_table.insert(
+        session_id="ABC123",
+        backup_id="CDE456",
+        action="insert",
+        old=None,
+        new="{'new_value': 11111}",
+        post_successful=False)
+
+    cursor = backup_table.connection.cursor()
+    cursor.execute(f"SELECT * FROM {backup_table.table}")
+    data = cursor.fetchall()
+    assert data == [('ABC123', 'CDE456', 'insert', None, "{'new_value': 11111}", 0)]
+
+    # Check inserting forbidden action
+    with pytest.raises(sqlite3.Error):
+        backup_table.insert(
+            session_id="a",
+            backup_id="a",
+            action="forbidden_action",
+            old=None,
+            new="a",
+            post_successful=False)
+
+
+def test_backup_table_update():
+    backup_table = sql_operations.SqlTableBackup(":memory:")
+    backup_table.insert(
+        session_id="ABC123",
+        backup_id="CDE456",
+        action="update",
+        old=None,
+        new="{'new_value': 11111}",
+        post_successful=False)
+
+    backup_table.update(post_successful=True)
+
+    cursor = backup_table.connection.cursor()
+    cursor.execute(f"SELECT * FROM {backup_table.table}")
+    data = cursor.fetchall()
+    assert data == [('ABC123', 'CDE456', 'update', None, "{'new_value': 11111}", 1)]

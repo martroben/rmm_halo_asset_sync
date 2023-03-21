@@ -6,7 +6,7 @@ import logging
 import os
 import sqlite3
 # external
-import xml.etree.ElementTree as xml_ET      # xml parser
+import xml.etree.ElementTree as xml_ET              # xml parser
 # local
 import client_classes
 import general
@@ -16,19 +16,20 @@ import nsight_requests
 from sql_operations import SqlTableBackup, SqlTableSessions
 
 
-###########################################
-# Import environmental / config variables #
-###########################################
+#############################################
+# Environmental / global / config variables #
+#############################################
 
+# Config variables
 ini_file_path = ".ini"
 ini_parameters = general.parse_input_file(ini_file_path)
 
+# Env variables
 env_file_path = ".env"
 general.parse_input_file(
     env_file_path,
     parse_values=False,
     set_environmental_variables=True)
-DRYRUN = bool(int(os.getenv("DRYRUN", 1)))
 
 required_env_variables = [
     "HALO_API_URL",
@@ -40,24 +41,31 @@ required_env_variables = [
     "NSIGHT_API_KEY"]
 
 missing_env_variables = [variable for variable in required_env_variables if os.getenv(variable, None) is None]
+if missing_env_variables:
+    log_entry = log.EnvVariablesMissing(missing_env_variables)
+    log_entry.record("ERROR")
+    exit(1)
+
+# Global variables
+DRYRUN = bool(int(os.getenv("DRYRUN", 1)))
+SESSION_ID = general.generate_random_hex(8)
 
 
 ###############
 # Set logging #
 ###############
 
-session_id = general.generate_random_hex(8)
 logger = log.setup_logger(
     name=ini_parameters["LOGGER_NAME"],
     level=ini_parameters["LOG_LEVEL"],
     indicator=ini_parameters["LOG_STRING_INDICATOR"],
-    session_id=session_id,
+    session_id=SESSION_ID,
     dryrun=DRYRUN)
 
 
 #############
 # Setup SQL #
-#############   ################################ tests
+#############
 
 # Use in-memory SQL for dry-run
 sql_database_path = ":memory:" if DRYRUN else ini_parameters["SQL_DATABASE_PATH"]
@@ -67,10 +75,13 @@ sql_backup_table = SqlTableBackup(sql_database_path)
 
 # Insert session info to SQL
 sql_sessions_table.insert(
-    session_id=session_id,
+    session_id=SESSION_ID,
     time_unix=int(datetime.now().timestamp()),
     status="started")
 
+
+################################## Tests for using where
+################################## Test: Erroneous where statement should raise ValueError
 
 ##################
 # Get Halo token #
@@ -180,7 +191,7 @@ for client in missing_clients:
         logger.info(f"Backing up Client. Backup id: {backup_id}")
         backup_data = json.dumps([client.get_post_payload()])
         sql_backup_table.insert(
-            session_id=session_id,
+            session_id=SESSION_ID,
             backup_id=backup_id,
             action="insert",
             old="",

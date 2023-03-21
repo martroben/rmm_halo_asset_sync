@@ -35,7 +35,11 @@ def create_table(table: str, columns: dict, connection: sqlite3.Connection) -> N
 
 
 def get_sql_type(python_type: str) -> str:
-    """Get SQLite data type name that corresponds to input python data type name."""
+    """
+    Get SQLite data type name that corresponds to input python data type name.
+    :param python_type: Name of Python type to convert
+    :return: SQLite data type name
+    """
     sql_type_reference = {
         "int": "INTEGER",
         "float": "REAL",
@@ -88,8 +92,8 @@ def parse_where_parameter(statement: str) -> tuple:
 
 def typecast_input_value(value: str) -> (int | float | str):
     """
-    Typecast "where"-string value component from string to a more proper type
-    :param value: "where"-string value component. E.g. 99 in "column_name < 99"
+    Typecast "where"-string value component from str type to a more proper type
+    :param value: "where"-string value component. E.g. 99 from "column1 < 99"
     :return: Int or float if value is convertible to number. Otherwise, returns input string.
     """
     try:                                                    # Convert to float if no error
@@ -105,7 +109,7 @@ def parse_in_values(value: str) -> list:
     """
     Parses arguments of sql "IN" statement.
     E.g. '("virginica","setosa")' -> ['virginica', 'setosa']
-    :param value: Value component from SQL "IN" statement
+    :param value: Value component from SQL "IN" statement. E.g. (99, 100) from "column1 IN (99, 100)"
     :return: A list of parsed values
     """
     return [string.strip(r"'\"()") for string in value.split(",")]
@@ -113,8 +117,8 @@ def parse_in_values(value: str) -> list:
 
 def compile_where_statement(parsed_inputs: list[tuple]) -> tuple[str, list]:
     """
-    Take a list of "where"-statements. Return a tuple in the following form:
-    ("where"-string formatted with placeholders, list of corresponding values).
+    Takes a list of parsed "where"-statement tuples. Return a tuple with "?"-placeholders in the following form:
+    ("where"-string formatted with "?"-placeholders, list of corresponding values).
     E.g. [("column1", "<", 99), ("column2", "IN", ["value1", "value2"])] to
     ("WHERE column1 < ? AND column2 IN (?,?)", [99, "value1", "value2"] )
     :param parsed_inputs: List of parsed "where"-statements in the form of (column, operator, value)
@@ -140,7 +144,7 @@ def read_table(table: str, connection: sqlite3.Connection, where: tuple = None) 
     :param table: Name of table
     :param connection: SQLite connection object
     :param where: SQL-like "where"-statement. See sql_operations.parse_where_parameter for supported operators
-    :return: List of dicts corresponding to the rows returned in the form of {column_name: value, ...}
+    :return: List of dicts corresponding to the rows, in the form of {column1: value1, column2: value2, ...}
     """
     # Add where statement values, if given
     sql_statement = f"SELECT * FROM {table};"
@@ -166,7 +170,7 @@ def insert_row(table: str, connection: sqlite3.Connection, **kwargs) -> int:
     Inserts a single row to a SQLite table
     :param table: Name of the table to insert to
     :param connection: SQLite connection object
-    :param kwargs: Key-value (column name: value) pairs to insert
+    :param kwargs: Key-value pairs to insert. In the form of column name: value
     :return: Number of rows inserted (1 or 0)
     """
     column_names = list()
@@ -189,7 +193,13 @@ def insert_row(table: str, connection: sqlite3.Connection, **kwargs) -> int:
 
 def update_rows(table: str, connection: sqlite3.Connection, where: tuple = None, **kwargs) -> int:
     """
-    Returns number of changed rows.
+    Update values in existing rows, specified by the "where"-statement.
+    If no "where"-statement is given, updates all rows
+    :param table: Name of the table to update
+    :param connection: SQLite connection object
+    :param where: SQL-like "where"-statement. See sql_operations.parse_where_parameter for supported operators
+    :param kwargs: Key-value pairs to update. In the form of column name: value
+    :return: Number of changed rows.
     """
     sql_cursor = connection.cursor()
     column_assignments = list()
@@ -199,12 +209,16 @@ def update_rows(table: str, connection: sqlite3.Connection, where: tuple = None,
         column_values += (value,)
     column_assignments_string = ",".join(column_assignments)
 
-    placeholder_values = column_values + where[1]
+    placeholder_values = column_values
     sql_statement = f"""
         UPDATE {table}
-        SET {column_assignments_string}
-        WHERE {where[0]};
+        SET {column_assignments_string};
         """
+
+    if where:
+        placeholder_values += where[1]
+        sql_statement = sql_statement.replace(";", f"WHERE {where[0]};")
+
     sql_cursor.execute(sql_statement, placeholder_values)
     connection.commit()
     return sql_cursor.rowcount
@@ -212,7 +226,10 @@ def update_rows(table: str, connection: sqlite3.Connection, where: tuple = None,
 
 def get_columns_types(table: str, connection: sqlite3.Connection) -> dict:
     """
-    Gives {column name: column SQLite type}
+    Query SQLite table for column names and their types
+    :param table: Name of the table
+    :param connection: SQLite connection object
+    :return: A dict in the form of {column_name1: column_SQLite_type1, column_name2: ...}
     """
     sql_cursor = connection.cursor()
     sql_statement = f"PRAGMA table_info({table})"
@@ -224,15 +241,21 @@ def get_columns_types(table: str, connection: sqlite3.Connection) -> dict:
 
 def count_rows(table: str, connection: sqlite3.Connection) -> int:
     """
-    Get the number of rows a table has.
-    :param table:
-    :param connection:
-    :return:
+    Query a SQLite table for the number of rows.
+    :param table: Name of the table
+    :param connection: SQLite connection object
+    :return: Number of rows in the table. If table doesn't exist, returns 0.
     """
     sql_cursor = connection.cursor()
     sql_statement = f"SELECT COUNT(*) FROM {table}"
-    response = sql_cursor.execute(sql_statement)
-    n_rows = response.fetchone()[0]
+    try:
+        response = sql_cursor.execute(sql_statement)
+        n_rows = response.fetchone()[0]
+    except sqlite3.OperationalError as error:
+        if "no such table" in str(error).lower():
+            n_rows = 0
+        else:
+            raise
     return n_rows
 
 
@@ -341,7 +364,7 @@ class SqlTableBackup(SqlInterface):
     def __init__(self, path: str):
         super().__init__(path, table=self.default_table, columns=self.default_columns)
 
-    def insert(self, session_id: str, backup_id: str, action: str, old: str, new: str,
+    def insert(self, session_id: str, backup_id: str, action: str, old: (str | None), new: str,
                post_successful: (bool, int)) -> None:
         """
         Function to enter row to SQL backup table with structured parameters.
@@ -353,6 +376,9 @@ class SqlTableBackup(SqlInterface):
         :param post_successful: Indication that the backed up change was successfully posted to Halo
         :return: None
         """
+        if action.lower() not in self.allowed_backup_actions:
+            raise sqlite3.Error(f"Invalid backup action: '{action}'. "
+                                f"Allowed actions: {', '.join(self.allowed_backup_actions)}.")
         insert_row(
             table=self.table,
             connection=self.connection,
@@ -361,4 +387,4 @@ class SqlTableBackup(SqlInterface):
             action=action.lower(),
             old=old,
             new=new,
-            post_successful=post_successful)
+            post_successful=int(post_successful))

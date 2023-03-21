@@ -1,6 +1,9 @@
 
 # standard
+from dataclasses import dataclass, field
 import logging
+import os
+
 
 def setup_logger(name: str, level: str, indicator: str, session_id: str, dryrun: bool) -> logging.Logger:
     """
@@ -24,11 +27,73 @@ def setup_logger(name: str, level: str, indicator: str, session_id: str, dryrun:
     return logger
 
 
+class LogString:
+    """
+    Parent class for log entries. Stores short and full versions of the log message and the logger to use.
+    Subclasses have log messages for specific scenarios, that can be easily translated.
+    """
+    exception: Exception                                    # Exception to be included in log message
+    logger: logging.Logger                                  # Logger to use for logging the message
+    exception_type: str                                     # Exception type name
+    short: str                                              # Short log message for http responses
+    full: str                                               # Long log message for saved logs
+
+    def __init__(self, short: str, full: str = None, exception: Exception = None, logger_name: str = None):
+        if logger_name is None:
+            logger = logging.getLogger(os.getenv("LOGGER_NAME", "root"))
+        else:
+            logger = logging.getLogger(logger_name)
+        self.logger = logger
+
+        if exception is not None:
+            self.exception = exception
+            self.exception_type = exception.__class__.__name__
+
+        if full is None:
+            full = short
+
+        self.short = short
+        self.full = full
+
+    def __str__(self):
+        return self.full
+
+    def record(self, level: str) -> None:
+        """"Execute" the log message - i.e. send it to the specified handler"""
+        self.logger.log(level=logging.getLevelName(level.upper()), msg=self.full)
+
+
+############################
+# sync_clients log strings #
+############################
+
+class EnvVariablesMissing(LogString):
+    """Error string for critical env variables not being present."""
+    def __init__(self, missing_variables: list):
+        short = "Critical env variables not found."
+        full = f"{short} Missing variables: {', '.join(missing_variables)}. Exiting."
+        super().__init__(short, full)
+
+
+##############################
+# sql_operations log strings #
+##############################
+
+class SqlCreateTableSyntax(LogString):
+    """Debug string to record SQL create table syntax."""
+    def __init__(self, sql_statement: str):
+        super().__init__(f"Creating table by SQL statement: {sql_statement}")
+
+
+
+
+
+
+
+
+
 
 # sqlite3.OperationalError
-def sql_create_table_syntax(sql_statement: str) -> str:
-    return f"Creating table by SQL statement: {sql_statement}"
-
 
 def sql_read_table_syntax(sql_statement: str) -> str:
     return f"Selecting from table by SQL statement: {sql_statement}"
