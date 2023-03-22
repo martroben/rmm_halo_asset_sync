@@ -80,9 +80,6 @@ sql_sessions_table.insert(
     status="started")
 
 
-################################## Tests for using where
-################################## Test: Erroneous where statement should raise ValueError
-
 ##################
 # Get Halo token #
 ##################

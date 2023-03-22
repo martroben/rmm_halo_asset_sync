@@ -129,6 +129,71 @@ def test_row_count_nonexisting_table():
     assert n_rows == 0
 
 
+def test_read_table():
+    table_interface = sql_operations.SqlInterface(
+        path=":memory:",
+        table="test_table",
+        columns={"text_column": "TEXT", "integer_column": "INTEGER", "float_column": "FLOAT"})
+
+    rows_to_insert = [insert_row_dict1, insert_row_dict2, insert_row_dict3, insert_row_dict1]
+    for row in rows_to_insert:
+        table_interface.insert(**row)
+
+    read_rows = sql_operations.read_table("test_table", table_interface.connection)
+    read_rows_existing_values = list()
+    read_rows_existing_values += [{key: value for key, value in row.items() if value is not None} for row in read_rows]
+    assert rows_to_insert == read_rows_existing_values
+
+
+def test_read_table_where():
+    table_interface = sql_operations.SqlInterface(
+        path=":memory:",
+        table="test_table",
+        columns={"text_column": "TEXT", "integer_column": "INTEGER", "float_column": "FLOAT"})
+
+    rows_to_insert = [insert_row_dict1, insert_row_dict2, insert_row_dict3, insert_row_dict1]
+    for row in rows_to_insert:
+        table_interface.insert(**row)
+
+    where1 = table_interface.select()
+    where1_existing_values = [{key: value for key, value in row.items() if value is not None} for row in where1]
+    assert where1_existing_values == rows_to_insert
+
+    where2 = table_interface.select(where="integer_column = 1")
+    where2_existing_values = [{key: value for key, value in row.items() if value is not None} for row in where2]
+    assert where2_existing_values == [insert_row_dict1, insert_row_dict3, insert_row_dict1]
+
+    where3 = table_interface.select(where="integer_column != 1")
+    where3_existing_values = [{key: value for key, value in row.items() if value is not None} for row in where3]
+    assert where3_existing_values == [insert_row_dict2]
+
+    where4 = table_interface.select(where="integer_column > 1")
+    where4_existing_values = [{key: value for key, value in row.items() if value is not None} for row in where4]
+    assert where4_existing_values == [insert_row_dict2]
+
+    where5 = table_interface.select(where=["integer_column < 2", "float_column > 5"])
+    where5_existing_values = [{key: value for key, value in row.items() if value is not None} for row in where5]
+    assert where5_existing_values == [insert_row_dict3]
+
+    where6 = table_interface.select(where=["text_column IN (text1, text3)"])
+    where6_existing_values = [{key: value for key, value in row.items() if value is not None} for row in where6]
+    assert where6_existing_values == [insert_row_dict1, insert_row_dict3, insert_row_dict1]
+
+
+def test_read_data_where_error():
+    table_interface = sql_operations.SqlInterface(
+        path=":memory:",
+        table="test_table",
+        columns={"text_column": "TEXT", "integer_column": "INTEGER", "float_column": "FLOAT"})
+
+    rows_to_insert = [insert_row_dict1, insert_row_dict2, insert_row_dict3, insert_row_dict1]
+    for row in rows_to_insert:
+        table_interface.insert(**row)
+
+    with pytest.raises(ValueError):
+        where_result = table_interface.select(where="integer_column =")
+
+
 def test_sessions_table():
     sessions_table = sql_operations.SqlTableSessions(":memory:")
     assert sessions_table.info()["columns"] == sessions_table.default_columns

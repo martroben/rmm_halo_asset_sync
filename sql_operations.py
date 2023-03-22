@@ -112,7 +112,11 @@ def parse_in_values(value: str) -> list:
     :param value: Value component from SQL "IN" statement. E.g. (99, 100) from "column1 IN (99, 100)"
     :return: A list of parsed values
     """
-    return [string.strip(r"'\"()") for string in value.split(",")]
+    separated_at_comma = [string.strip(r"'\"()") for string in value.split(",")]
+    parsed_values = list()
+    for string in separated_at_comma:           # Strip whitespaces if the string isn't entirely made of whitespaces.
+        parsed_values += [string.strip(" ") if len(string.strip(" ")) else string]
+    return parsed_values
 
 
 def compile_where_statement(parsed_inputs: list[tuple]) -> tuple[str, list]:
@@ -260,7 +264,16 @@ def count_rows(table: str, connection: sqlite3.Connection) -> int:
 
 
 class SqlInterface:
+    """
+    Base class for managing SQLite queries.
+    Instance variables:
+    table: str - name of table
+    columns: dict - Column info in the form {"column1_name": "column1 SQLite type", "column2_name": ...}
+    connection: sqlite3.Connection - SQLite connection object
+    """
+
     def __init__(self, path: str, table: str, columns: dict):
+        """Save necessary instance variables and create a table if it doesn't exist."""
         self.table = table
         self.columns = columns
         self.connection = get_connection(path)
@@ -270,6 +283,7 @@ class SqlInterface:
         return str(self.info())
 
     def create_table(self):
+        """Create a table by the name specified in instance attributes."""
         create_table(
             table=self.table,
             columns=self.columns,
@@ -279,7 +293,7 @@ class SqlInterface:
     def select(self, where: (str | list[str]) = None) -> list[dict]:
         """
         Get data from the table.
-        Data is filtered if "where"-statements are given. Otherwise, all data from the table is returned.
+        Data is also filtered if "where"-statements are given. Otherwise, all data from the table is returned
         :param where: "where"-statements. A single string or a list of strings. E.g. "WHERE column1 != 'red'"
         :return: Selected data
         """
@@ -305,12 +319,13 @@ class SqlInterface:
         self.connection.commit()
         return n_rows_inserted
 
-    def update(self, where: (str | list[str]) = None, **kwargs):
+    def update(self, where: (str | list[str]) = None, **kwargs) -> int:
         """
-        Column name - value pairs that are to be changed.
-        :param where:
-        :param kwargs:
-        :return:
+        Update values in the table specified in kwargs.
+        Only specific rows are changed if a "where"-statement is provided.
+        :param where: "where"-statements. A single string or a list of strings. E.g. "WHERE column1 != 'red'"
+        :param kwargs: Values to update in the form of column_name=new_value
+        :return: Number of rows updated
         """
         # Parse where inputs
         if where:
@@ -329,6 +344,7 @@ class SqlInterface:
 
     def info(self):
         """
+        Get general info about table: number of rows + columns and their types
         :return: {"n_rows": 5, "columns": {"column1": "INTEGER", "column2": "FLOAT", ...}}
         """
         columns_types = get_columns_types(self.table, self.connection)
@@ -337,6 +353,7 @@ class SqlInterface:
 
 
 class SqlTableSessions(SqlInterface):
+    """Interface for sessions table"""
     default_table = "sessions"
     default_columns = {
         "session_id": "TEXT",
@@ -351,6 +368,7 @@ class SqlTableSessions(SqlInterface):
 
 
 class SqlTableBackup(SqlInterface):
+    """Interface for backup table."""
     default_table = "backup"
     default_columns = {
         "session_id": "TEXT",
@@ -359,13 +377,13 @@ class SqlTableBackup(SqlInterface):
         "old": "TEXT",
         "new": "TEXT",
         "post_successful": "INTEGER"}
-    allowed_backup_actions = ["insert", "update", "remove"]
+    allowed_backup_actions = ["insert", "update", "remove"]     # Other values can't be inserted
 
     def __init__(self, path: str):
         super().__init__(path, table=self.default_table, columns=self.default_columns)
 
     def insert(self, session_id: str, backup_id: str, action: str, old: (str | None), new: str,
-               post_successful: (bool, int)) -> None:
+               post_successful: (bool, int)) -> int:
         """
         Function to enter row to SQL backup table with structured parameters.
         :param session_id: Session id, hexadecimal string
@@ -374,12 +392,12 @@ class SqlTableBackup(SqlInterface):
         :param old: Old value that can be restored
         :param new: New value to recognize what was changed
         :param post_successful: Indication that the backed up change was successfully posted to Halo
-        :return: None
+        :return: Number of rows inserted (0 or 1)
         """
         if action.lower() not in self.allowed_backup_actions:
             raise sqlite3.Error(f"Invalid backup action: '{action}'. "
                                 f"Allowed actions: {', '.join(self.allowed_backup_actions)}.")
-        insert_row(
+        n_rows_inserted = insert_row(
             table=self.table,
             connection=self.connection,
             session_id=session_id,
@@ -388,3 +406,4 @@ class SqlTableBackup(SqlInterface):
             old=old,
             new=new,
             post_successful=int(post_successful))
+        return n_rows_inserted
