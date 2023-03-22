@@ -2,6 +2,7 @@
 # standard
 import logging
 import os
+import requests
 
 
 def setup_logger(name: str, level: str, indicator: str, session_id: str, dryrun: bool) -> logging.Logger:
@@ -84,12 +85,36 @@ class SqlCreateTableSyntax(LogString):
         super().__init__(f"Creating table by SQL statement: {sql_statement}")
 
 
+#######################
+# general log strings #
+#######################
+
+class RetryAttempt(LogString):
+    """Detailed log string for retry attempt."""
+    def __init__(self, function, exception: Exception, n_retries: int, interval_sec: float, attempt: int):
+        short = f"Retrying function '{function.__name__}' in {round(interval_sec, 2)} seconds, " \
+                f"because {type(exception).__name__} occurred. Attempt {attempt} of {n_retries}."
+        full = f"{short} Exception: {exception}"
+        super().__init__(short=short, full=full, exception=exception)
 
 
+class RetryFailed(LogString):
+    """Failed retry log entry."""
+    def __init__(self, function, exception: Exception, n_retries: int):
+        short = f"Retrying function '{function.__name__}' failed after {n_retries} attempts, " \
+                 f"because {type(exception).__name__} occurred."
+        super().__init__(short=short, exception=exception)
 
 
+#############################
+# halo_requests log strings #
+#############################
 
-
+class BadResponse(LogString):
+    """Bad response from http request."""
+    def __init__(self, method: str, url: str, response: requests.Response):
+        short = f"{method} request failed with {response.status_code} ({response.reason}). URL: {url}"
+        super().__init__(short)
 
 
 

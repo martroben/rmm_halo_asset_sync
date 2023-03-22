@@ -62,6 +62,7 @@ logger = log.setup_logger(
     session_id=SESSION_ID,
     dryrun=DRYRUN)
 
+########################### pass function name / context to LogString.record and include to log string
 
 #############
 # Setup SQL #

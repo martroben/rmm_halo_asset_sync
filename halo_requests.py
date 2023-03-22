@@ -8,6 +8,7 @@ import requests
 import responses as mock_responses
 # local
 import general
+import log
 
 
 class HaloSession(requests.Session):
@@ -22,21 +23,18 @@ class HaloAuthorizer:
     """Interface to get authorization tokens for Halo API requests with different scopes."""
     grant_type = "client_credentials"
 
-    def __init__(self, url: str, tenant: str, client_id: str, secret: str, log_name: str = "root", fatal=True):
+    def __init__(self, url: str, tenant: str, client_id: str, secret: str):
         self.url = url
         self.tenant = tenant
         self.client_id = client_id
         self.secret = secret
-        self.log_name = log_name
-        self.fatal = fatal
 
-    @general.retry_function()
-    def get_token(self, scope: str, **kwargs) -> dict[str]:
+    @general.retry_function(fatal=True)
+    def get_token(self, scope: str) -> dict[str]:
         """
         Get authorization token for the requested scope
-        :param scope: Desired scope of authorization. Usually in the form read|edit:endpoint.
-        :param kwargs: Additional keyword parameters to supply optional log_name and fatal parameter.
-        :return: A dict with keys token_type and access_token
+        :param scope: Desired scope of authorization. Usually in the form of read:endpoint or edit:endpoint.
+        :return: A dict in the form: {"token_type": "Bearer", "access_token": TOKENSTRING123123"}
         """
         parameters = {
             "tenant": self.tenant}
@@ -52,8 +50,8 @@ class HaloAuthorizer:
             data=authentication_body,
             params=parameters)
 
-        if not response.ok:  # Raise error to trigger retry
-            raise ConnectionError(get_log_string_bad_response("GET", self.url, response))
+        if not response.ok:         # Raise error to trigger retry
+            raise ConnectionError(log.BadResponse("POST", self.url, response))
         return response.json()
 
 
@@ -192,19 +190,6 @@ def get_log_string_request_sent(response: requests.Response) -> str:
                  f"URL: {response.request.url}. " \
                  f"Headers: {headers}. " \
                  f"Body: {response.request.body}."
-    return log_string
-
-
-def get_log_string_bad_response(method: str, url: str, response: requests.Response) -> str:
-    """
-    Compile detailed log string with bad response info
-    :param method: Http request method (get, post...)
-    :param url: Http request url
-    :param response: Response object returned by a request
-    :return: String to be used in log
-    """
-    log_string = f"{method} request failed. URL: {url} " \
-                 f"Status: {response.status_code} ({response.reason})"
     return log_string
 
 
