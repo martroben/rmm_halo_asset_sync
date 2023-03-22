@@ -11,9 +11,7 @@ import general
 
 
 class HaloSession(requests.Session):
-    """
-    A session object that includes the Halo authorization header.
-    """
+    """A session object that includes the Halo authorization header."""
     def __init__(self, token: dict):
         super().__init__()
         headers = {"Authorization": f"{token['token_type']} {token['access_token']}"}
@@ -21,9 +19,7 @@ class HaloSession(requests.Session):
 
 
 class HaloAuthorizer:
-    """
-    Interface to get authorization tokens for Halo API requests with different scopes.
-    """
+    """Interface to get authorization tokens for Halo API requests with different scopes."""
     grant_type = "client_credentials"
 
     def __init__(self, url: str, tenant: str, client_id: str, secret: str, log_name: str = "root", fatal=True):
