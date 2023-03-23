@@ -62,7 +62,6 @@ logger = log.setup_logger(
     session_id=SESSION_ID,
     dryrun=DRYRUN)
 
-########################### pass function name / context to LogString.record and include to log string
 
 #############
 # Setup SQL #
@@ -86,15 +85,12 @@ sql_sessions_table.insert(
 ##################
 
 halo_authorizer = halo_requests.HaloAuthorizer(
-    url=env_parameters["HALO_API_AUTHENTICATION_URL"],
-    tenant=env_parameters["HALO_API_TENANT"],
-    client_id=env_parameters["HALO_API_CLIENT_ID"],
-    secret=env_parameters["HALO_API_CLIENT_SECRET"],
-    log_name=log_name)
+    url=os.getenv("HALO_API_AUTHENTICATION_URL"),
+    tenant=os.getenv("HALO_API_TENANT"),
+    client_id=os.getenv("HALO_API_CLIENT_ID"),
+    secret=os.getenv("HALO_API_CLIENT_SECRET"))
 
-halo_client_token = halo_authorizer.get_token(
-    scope="edit:customers",
-    fatal=True)                                         # Abort if there is error in authorization
+halo_client_token = halo_authorizer.get_token(scope="edit:customers")
 
 
 #######################

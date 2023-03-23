@@ -21,19 +21,25 @@ _ = log.setup_logger(
 
 @general.retry_function(interval_sec=0)
 def bad_request():
-    requests.get("https://badurl")
+    response = requests.get("https://badurl")
+    if not response.ok:  # Raise error to trigger retry
+        raise ConnectionError
     return
 
 
 @general.retry_function(interval_sec=0, fatal=True)
 def bad_request_fatal():
-    requests.get("https://badurl")
+    response = requests.get("https://badurl")
+    if not response.ok:  # Raise error to trigger retry
+        raise ConnectionError
     return
 
 
 @general.retry_function(interval_sec=0, fatal=True)
 def bad_request_fatal():
-    requests.get("https://badurl")
+    response = requests.get("https://badurl")
+    if not response.ok:  # Raise error to trigger retry
+        raise ConnectionError
     return
 
 

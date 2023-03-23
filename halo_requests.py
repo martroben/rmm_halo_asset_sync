@@ -51,7 +51,12 @@ class HaloAuthorizer:
             params=parameters)
 
         if not response.ok:         # Raise error to trigger retry
-            raise ConnectionError(log.BadResponse("POST", self.url, response))
+            error_string = log.BadResponse(
+                method="POST",
+                url=self.url,
+                response=response,
+                context="HaloAuthorizer.get_token")
+            raise ConnectionError(error_string)
         return response.json()
 
 
