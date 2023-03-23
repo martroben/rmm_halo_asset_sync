@@ -55,12 +55,22 @@ SESSION_ID = general.generate_random_hex(8)
 # Set logging #
 ###############
 
+log_level = ini_parameters["LOG_LEVEL"].upper()
+
 logger = log.setup_logger(
     name=ini_parameters["LOGGER_NAME"],
-    level=ini_parameters["LOG_LEVEL"],
+    level=log_level,
     indicator=ini_parameters["LOG_STRING_INDICATOR"],
     session_id=SESSION_ID,
     dryrun=DRYRUN)
+
+# Replace handlers for other loggers
+other_loggers = ["urllib3"]
+for logger_name in other_loggers:
+    other_logger = logging.getLogger(logger_name)
+    other_logger.handlers.clear()
+    other_logger.addHandler(logger.handlers[0])
+    other_logger.setLevel(log_level)
 
 
 #############
@@ -95,13 +105,11 @@ halo_client_token = halo_authorizer.get_token(scope="edit:customers")
 
 #######################
 # Get N-sight clients #
-#######################
+#######################  ############################# Figure out how to get requests module logs
 
-nsight_clients_response = nsight_requests.get_clients(
-    url=env_parameters["NSIGHT_BASE_URL"],
-    api_key=env_parameters["NSIGHT_API_KEY"],
-    log_name=log_name,
-    fatal=False)                                        # Continue even if unable to retrieve N-sight clients
+nsight_clients_response = nsight_requests.get_clients(          # Uses non-fatal retry
+    url=os.getenv("NSIGHT_BASE_URL"),
+    api_key=os.getenv("NSIGHT_API_KEY"))
 
 nsight_clients_raw = xml_ET.fromstring(nsight_clients_response.text).findall("./items/client")
 nsight_clients = [client_classes.NsightClient(client) for client in nsight_clients_raw]
