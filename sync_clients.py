@@ -1,6 +1,8 @@
 
 # standard
 from datetime import datetime
+from functools import partial
+import http.client
 import json
 import logging
 import os
@@ -56,13 +58,23 @@ SESSION_ID = general.generate_random_hex(8)
 ###############
 
 log_level = ini_parameters["LOG_LEVEL"].upper()
+log_level_number = logging.getLevelName(log_level)
 
 logger = log.setup_logger(
     name=ini_parameters["LOGGER_NAME"],
-    level=log_level,
+    level=log_level_number,
     indicator=ini_parameters["LOG_STRING_INDICATOR"],
     session_id=SESSION_ID,
     dryrun=DRYRUN)
+
+
+if log_level == "DEBUG":
+    def print_logger(*args):   ################### Maybe create a subclass of logger with added method log_print
+                                ################## Add functionality to censor log strings
+        logger.log(10, " ".join(args))
+    http.client.print = print_logger
+    http.client.HTTPConnection.debuglevel = 1
+
 
 # Replace handlers for other loggers
 other_loggers = ["urllib3"]
@@ -70,7 +82,7 @@ for logger_name in other_loggers:
     other_logger = logging.getLogger(logger_name)
     other_logger.handlers.clear()
     other_logger.addHandler(logger.handlers[0])
-    other_logger.setLevel(log_level)
+    other_logger.setLevel(log_level_number)
 
 
 #############

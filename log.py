@@ -5,18 +5,19 @@ import os
 import requests
 
 
-def setup_logger(name: str, level: str, indicator: str, session_id: str, dryrun: bool) -> logging.Logger:
+def setup_logger(name: str, level: (str | int), indicator: str, session_id: str, dryrun: bool) -> logging.Logger:
     """
     Create a logger with custom format, that can be parsed by external log receiver
     :param name: Name for the log messages emitted by the application
-    :param level: Level of log messages that the logger sends (DEBUG/INFO/WARNING/ERROR)
+    :param level: Level of log messages that the logger sends (DEBUG/INFO/WARNING/ERROR) or (10/20/...)
     :param indicator: Unique indicator to let external log receiver distinguish which stdout entries came from the app
     :param session_id: Session id to add to log messages.
     :param dryrun: If program is running in dryrun mode. Logger indicates it in log messages
     :return: a logging.Logger object with assigned handler and formatter
     """
     logger = logging.getLogger(name)
-    logger.setLevel(level.upper())
+    level = logging.getLevelName(level.upper()) if isinstance(level, str) else level
+    logger.setLevel(level)
     handler = logging.StreamHandler()              # Direct logs to stdout
     formatter = logging.Formatter(
         fmt=f"{indicator}{{asctime}} | {session_id} | {{levelname}}{dryrun*' | **DRYRUN**'}: {{message}}",
