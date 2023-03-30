@@ -2,6 +2,9 @@
 # standard
 import logging
 import os
+import re
+import sys
+
 import requests
 
 
@@ -18,7 +21,8 @@ def setup_logger(name: str, level: (str | int), indicator: str, session_id: str,
     logger = logging.getLogger(name)
     level = logging.getLevelName(level.upper()) if isinstance(level, str) else level
     logger.setLevel(level)
-    handler = logging.StreamHandler()              # Direct logs to stdout
+    handler = logging.StreamHandler()
+    handler.setStream(sys.stdout)               # Direct logs to stdout
     formatter = logging.Formatter(
         fmt=f"{indicator}{{asctime}} | {session_id} | {{levelname}}{dryrun*' | **DRYRUN**'}: {{message}}",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -61,9 +65,23 @@ class LogString:
     def __str__(self):
         return self.full
 
+    def redact(self, patterns: (re.Pattern | list[re.Pattern])) -> None:
+        """Redact input patterns from log string"""
+        redact_string = "<REDACTED_INFO>"
+
+        if not isinstance(patterns, list):
+            patterns = [patterns]
+
+        for pattern in patterns:
+            self.short = re.sub(pattern, redact_string, self.short)
+            self.full = re.sub(pattern, redact_string, self.full)
+
     def record(self, level: str) -> None:
         """"Execute" the log message - i.e. send it to the specified handler"""
-        self.logger.log(level=logging.getLevelName(level.upper()), msg=f"[{self.context}] {self.full}")
+        log_message = f"[{self.context}] {self.full}"
+        self.logger.log(
+            level=logging.getLevelName(level.upper()),
+            msg=log_message)
 
 
 ############################

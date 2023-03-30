@@ -1,4 +1,4 @@
-
+import re
 # standard
 from datetime import datetime
 from functools import partial
@@ -52,37 +52,50 @@ if missing_env_variables:
 DRYRUN = bool(int(os.getenv("DRYRUN", 1)))
 SESSION_ID = general.generate_random_hex(8)
 
+####################### Redact sensitive info
+####################### https://medium.com/@adamszpilewicz/protecting-sensitive-data-in-python-logging-a-guide-to-redacting-information-fe2917e39a38
+REDACT_PATTERNS = [
+    re.compile(os.getenv("HALO_API_TENANT"), flags=re.IGNORECASE),
+    re.compile(os.getenv("HALO_API_CLIENT_ID"), flags=re.IGNORECASE),
+    re.compile(os.getenv("HALO_API_CLIENT_SECRET"), flags=re.IGNORECASE)]
+
 
 ###############
 # Set logging #
 ###############
 
+os.environ["LOGGER_NAME"] = ini_parameters["LOGGER_NAME"]
 log_level = ini_parameters["LOG_LEVEL"].upper()
 log_level_number = logging.getLevelName(log_level)
 
 logger = log.setup_logger(
-    name=ini_parameters["LOGGER_NAME"],
+    name=os.getenv("LOGGER_NAME", "root"),
     level=log_level_number,
     indicator=ini_parameters["LOG_STRING_INDICATOR"],
     session_id=SESSION_ID,
     dryrun=DRYRUN)
 
-
-if log_level == "DEBUG":
-    def print_logger(*args):   ################### Maybe create a subclass of logger with added method log_print
-                                ################## Add functionality to censor log strings
-        logger.log(10, " ".join(args))
-    http.client.print = print_logger
-    http.client.HTTPConnection.debuglevel = 1
-
-
-# Replace handlers for other loggers
+# Replace other loggers
 other_loggers = ["urllib3"]
 for logger_name in other_loggers:
-    other_logger = logging.getLogger(logger_name)
-    other_logger.handlers.clear()
-    other_logger.addHandler(logger.handlers[0])
-    other_logger.setLevel(log_level_number)
+    discarded_output = log.setup_logger(
+        name=logger_name,
+        level=log_level_number,
+        indicator=ini_parameters["LOG_STRING_INDICATOR"],
+        session_id=SESSION_ID,
+        dryrun=DRYRUN)
+
+# Capture HTTPConnection debug (replace print function in http.client.print)
+if log_level == "DEBUG":
+    def capture_print_output(*args) -> None:
+        log_entry = log.LogString(
+            short=" ".join(args),
+            context="http.client.HTTPConnection debug")
+        log_entry.redact(REDACT_PATTERNS)  ##################################
+        log_entry.record("DEBUG")
+
+    http.client.print = capture_print_output
+    http.client.HTTPConnection.debuglevel = 1
 
 
 #############
