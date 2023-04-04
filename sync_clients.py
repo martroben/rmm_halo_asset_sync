@@ -1,12 +1,12 @@
-import re
 # standard
 from datetime import datetime
-from functools import partial
 import http.client
 import json
 import logging
 import os
+import re
 import sqlite3
+import sys
 # external
 import xml.etree.ElementTree as xml_ET              # xml parser
 # local
@@ -52,50 +52,57 @@ if missing_env_variables:
 DRYRUN = bool(int(os.getenv("DRYRUN", 1)))
 SESSION_ID = general.generate_random_hex(8)
 
-####################### Redact sensitive info
-####################### https://medium.com/@adamszpilewicz/protecting-sensitive-data-in-python-logging-a-guide-to-redacting-information-fe2917e39a38
-REDACT_PATTERNS = [
-    re.compile(os.getenv("HALO_API_TENANT"), flags=re.IGNORECASE),
-    re.compile(os.getenv("HALO_API_CLIENT_ID"), flags=re.IGNORECASE),
-    re.compile(os.getenv("HALO_API_CLIENT_SECRET"), flags=re.IGNORECASE)]
-
 
 ###############
 # Set logging #
 ###############
 
-os.environ["LOGGER_NAME"] = ini_parameters["LOGGER_NAME"]
-log_level = ini_parameters["LOG_LEVEL"].upper()
-log_level_number = logging.getLevelName(log_level)
+# Set data redaction patterns
+redact_patterns = [
+    re.compile(os.getenv("HALO_API_TENANT"), flags=re.IGNORECASE),
+    re.compile(os.getenv("HALO_API_CLIENT_ID"), flags=re.IGNORECASE),
+    re.compile(os.getenv("HALO_API_CLIENT_SECRET"), flags=re.IGNORECASE)]
 
-logger = log.setup_logger(
-    name=os.getenv("LOGGER_NAME", "root"),
-    level=log_level_number,
+redaction_filter = log.Redactor(patterns=redact_patterns)
+
+# Set log string formatting
+formatter = log.StandardFormatter(
     indicator=ini_parameters["LOG_STRING_INDICATOR"],
     session_id=SESSION_ID,
     dryrun=DRYRUN)
 
-# Replace other loggers
-other_loggers = ["urllib3"]
-for logger_name in other_loggers:
-    discarded_output = log.setup_logger(
-        name=logger_name,
-        level=log_level_number,
-        indicator=ini_parameters["LOG_STRING_INDICATOR"],
-        session_id=SESSION_ID,
-        dryrun=DRYRUN)
+handler = logging.StreamHandler(sys.stdout)  # Direct logs to stdout
+handler.setFormatter(formatter)
+
+log_level = ini_parameters["LOG_LEVEL"].upper()
+
+# Set level and handler to root logger
+logging.getLogger().setLevel(log_level)
+logging.getLogger().addHandler(handler)
 
 # Capture HTTPConnection debug (replace print function in http.client.print)
 if log_level == "DEBUG":
     def capture_print_output(*args) -> None:
-        log_entry = log.LogString(
+        log_string = log.LogString(
             short=" ".join(args),
             context="http.client.HTTPConnection debug")
-        log_entry.redact(REDACT_PATTERNS)  ##################################
-        log_entry.record("DEBUG")
+        log_string.record("DEBUG")
 
     http.client.print = capture_print_output
     http.client.HTTPConnection.debuglevel = 1
+
+# initialize standard logger
+os.environ["LOGGER_NAME"] = ini_parameters["LOGGER_NAME"]
+logger = logging.getLogger(os.getenv("LOGGER_NAME", "root"))
+
+# Set redaction filter to all loggers
+################################ Not working for urllib3.connectionpool logger
+# logging.root.manager.loggerDict has all known loggers except root logger
+all_active_loggers = [logger for logger in logging.root.manager.loggerDict.values()
+                      if not isinstance(logger, logging.PlaceHolder)]
+
+for logger in all_active_loggers:
+    logger.addFilter(redaction_filter)
 
 
 #############
@@ -127,10 +134,11 @@ halo_authorizer = halo_requests.HaloAuthorizer(
 
 halo_client_token = halo_authorizer.get_token(scope="edit:customers")
 
+exit(0)
 
 #######################
 # Get N-sight clients #
-#######################  ############################# Figure out how to get requests module logs
+#######################
 
 nsight_clients_response = nsight_requests.get_clients(          # Uses non-fatal retry
     url=os.getenv("NSIGHT_BASE_URL"),

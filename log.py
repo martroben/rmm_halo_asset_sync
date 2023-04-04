@@ -8,28 +8,53 @@ import sys
 import requests
 
 
-def setup_logger(name: str, level: (str | int), indicator: str, session_id: str, dryrun: bool) -> logging.Logger:
-    """
-    Create a logger with custom format, that can be parsed by external log receiver
-    :param name: Name for the log messages emitted by the application
-    :param level: Level of log messages that the logger sends (DEBUG/INFO/WARNING/ERROR) or (10/20/...)
-    :param indicator: Unique indicator to let external log receiver distinguish which stdout entries came from the app
-    :param session_id: Session id to add to log messages.
-    :param dryrun: If program is running in dryrun mode. Logger indicates it in log messages
-    :return: a logging.Logger object with assigned handler and formatter
-    """
-    logger = logging.getLogger(name)
-    level = logging.getLevelName(level.upper()) if isinstance(level, str) else level
-    logger.setLevel(level)
-    handler = logging.StreamHandler()
-    handler.setStream(sys.stdout)               # Direct logs to stdout
-    formatter = logging.Formatter(
-        fmt=f"{indicator}{{asctime}} | {session_id} | {{levelname}}{dryrun*' | **DRYRUN**'}: {{message}}",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        style="{")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    return logger
+class Redactor(logging.Filter):
+    redact_replacement_string = "<REDACTED_INFO>"
+
+    def __init__(self, patterns: list[re.Pattern] = None):
+        super().__init__()
+        self.patterns = patterns or list()
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """
+        Override the filter method to redact data from logs
+        :param record: log record object
+        :return: Always true - i.e. apply filter
+        """
+        for pattern in self.patterns:
+            record.msg = pattern.sub(self.redact_replacement_string, record.msg)
+        return True
+
+
+class StandardFormatter(logging.Formatter):
+    def __init__(self, indicator: str, session_id: str, dryrun: bool = False):
+        dryrun_indicator = dryrun*f" | ---DRYRUN---"
+        super().__init__(
+            fmt=f"{indicator}{{asctime}} | {session_id}{dryrun_indicator} | {{levelname}}: {{message}}",
+            datefmt="%m/%d/%Y %H:%M:%S",
+            style="{")
+
+
+# def setup_logger(name: str, level: (str | int), formatter: logging.Formatter = None,
+#                  redaction_filter: logging.Filter = None) -> logging.Logger:
+#     """
+#     Create a logger with custom format, that can be parsed by external log receiver
+#     :param name: Name for the log messages emitted by the application
+#     :param level: Level of log messages that the logger sends (DEBUG/INFO/WARNING/ERROR) or (10/20/...)
+#     :param formatter:
+#     :param redaction_filter:
+#     :return: a logging.Logger object with assigned handler and formatter
+#     """
+#     logger = logging.getLogger(name)
+#     level = logging.getLevelName(level.upper()) if isinstance(level, str) else level
+#     logger.setLevel(level)
+#     handler = logging.StreamHandler(sys.stdout)     # Direct logs to stdout
+#     if formatter:
+#         handler.setFormatter(formatter)
+#     logger.addHandler(handler)
+#     if redaction_filter:
+#         logger.addFilter(redaction_filter)
+#     return logger
 
 
 class LogString:
@@ -64,17 +89,6 @@ class LogString:
 
     def __str__(self):
         return self.full
-
-    def redact(self, patterns: (re.Pattern | list[re.Pattern])) -> None:
-        """Redact input patterns from log string"""
-        redact_string = "<REDACTED_INFO>"
-
-        if not isinstance(patterns, list):
-            patterns = [patterns]
-
-        for pattern in patterns:
-            self.short = re.sub(pattern, redact_string, self.short)
-            self.full = re.sub(pattern, redact_string, self.full)
 
     def record(self, level: str) -> None:
         """"Execute" the log message - i.e. send it to the specified handler"""
