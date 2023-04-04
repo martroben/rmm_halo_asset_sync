@@ -2,6 +2,7 @@
 # standard
 from functools import partial
 import logging
+import os
 import re
 import requests
 # external
@@ -65,23 +66,21 @@ class HaloInterface:
     Interface for Halo API requests against a certain endpoint.
     Handles retries, logging, dryrun and pagination
     """
-    def __init__(self, url, endpoint: str, log_name: str = "root", dryrun=False):
+    def __init__(self, url, endpoint: str, dryrun=False):
         self.endpoint_url = url.strip("/") + "/" + endpoint
-        self.log_name = log_name
         self.dryrun = dryrun
         if self.dryrun:
-            self.post = partial(self.mock_request, method="POST")
+            self.post = partial(self.mock_request, method="POST") #####################################
 
     @general.retry_function()
     def request(self, session: HaloSession, method: str, params: dict = None,
-                json: (list, dict) = None, **kwargs) -> (requests.Response, None):
+                json: (list | dict) = None) -> (requests.Response, None):
         """
         Method to perform the actual requests. Handles logging and retries
         :param session: HaloSession object.
         :param method: Request method (e.g. get, post...)
         :param params: Request parameters (for GET requests)
         :param json: Dict for json content (for POST requests)
-        :param kwargs: Additional keyword parameters to supply optional log_name and fatal parameters to retry.
         If not provided in function, retry function attempts to read these from instance variables.
         :return: Response object or None if request fails
         """
@@ -91,8 +90,7 @@ class HaloInterface:
             params=params,
             json=json)
 
-        logger = logging.getLogger(self.log_name)
-        logger.debug(get_log_string_request_sent(response))
+        self.logger.debug(get_log_string_request_sent(response))
 
         if not response.ok:             # If request unsuccessful, raise error to trigger a retry
             error_string = get_log_string_bad_response(method, self.endpoint_url, response)

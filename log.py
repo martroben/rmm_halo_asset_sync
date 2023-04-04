@@ -71,16 +71,15 @@ class LogString:
 
     def __init__(self, short: str, full: str = None, context: str = None,
                  exception: Exception = None, logger_name: str = None):
+
         logger = logging.getLogger(logger_name) if logger_name else logging.getLogger(os.getenv("LOGGER_NAME", "root"))
         self.logger = logger
 
         if exception:
             self.exception = exception
             self.exception_type = exception.__class__.__name__
-
         if context:
             self.context = context
-
         if full is None:
             full = short
 

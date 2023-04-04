@@ -134,7 +134,6 @@ halo_authorizer = halo_requests.HaloAuthorizer(
 
 halo_client_token = halo_authorizer.get_token(scope="edit:customers")
 
-exit(0)
 
 #######################
 # Get N-sight clients #
@@ -147,6 +146,8 @@ nsight_clients_response = nsight_requests.get_clients(          # Uses non-fatal
 nsight_clients_raw = xml_ET.fromstring(nsight_clients_response.text).findall("./items/client")
 nsight_clients = [client_classes.NsightClient(client) for client in nsight_clients_raw]
 
+
+exit(0)
 
 ####################
 # Get Halo clients #
