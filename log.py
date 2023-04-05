@@ -9,6 +9,7 @@ import requests
 
 
 class Redactor(logging.Filter):
+    """logging.Filter subclass to redact patterns from logs"""
     redact_replacement_string = "<REDACTED_INFO>"
 
     def __init__(self, patterns: list[re.Pattern] = None):
@@ -17,13 +18,44 @@ class Redactor(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         """
-        Override the filter method to redact data from logs
-        :param record: log record object
-        :return: Always true - i.e. apply filter
+        Overriding the original filter method to redact, rather than filter.
+        :return: Always true - i.e. always apply filter
         """
-        for pattern in self.patterns:
-            record.msg = pattern.sub(self.redact_replacement_string, record.msg)
+        record.msg = self.redact(record.msg)
+        record.args = self.redact(record.args)
         return True
+
+    def redact_string(self, log_string: str):
+        for pattern in self.patterns:
+            log_string = pattern.sub(self.redact_replacement_string, log_string)
+        return log_string
+
+    def redact_number(self, log_number: (int | float)):
+        """Only redact numbers that match a redaction pattern exactly, not part of the number."""
+        for pattern in self.patterns:
+            if pattern.fullmatch(str(log_number)):
+                return 1234567890
+        return log_number
+
+    def redact(self, log_object):
+        if log_object is None:
+            return
+        if isinstance(log_object, str):
+            return self.redact_string(log_object)
+        if isinstance(log_object, (int, float)):
+            return self.redact_number(log_object)
+        if isinstance(log_object, tuple):
+            return tuple(self.redact(value) for value in log_object)
+        if isinstance(log_object, dict):
+            return {key: self.redact(value) for key, value in log_object.items()}
+        # For custom types try to typecast to str -> redact -> typecast back to original type
+        # Return original object if typecasting results in an error
+        try:
+            log_object_type = type(log_object)
+            redacted_object = self.redact_string(str(log_object))
+            return log_object_type(redacted_object)
+        except ValueError:
+            return log_object
 
 
 class StandardFormatter(logging.Formatter):
