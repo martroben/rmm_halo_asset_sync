@@ -16,6 +16,12 @@ class Redactor(logging.Filter):
         super().__init__()
         self.patterns = patterns or list()
 
+    def __str__(self):
+        return " | ".join(pattern.pattern for pattern in self.patterns)
+
+    def add_pattern(self, pattern: re.Pattern):
+        self.patterns += [pattern]
+
     def filter(self, record: logging.LogRecord) -> bool:
         """
         Overriding the original filter method to redact, rather than filter.

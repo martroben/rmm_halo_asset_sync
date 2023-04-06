@@ -30,7 +30,7 @@ class HaloAuthorizer:
         self.client_id = client_id
         self.secret = secret
 
-    @general.retry_function(fatal=True)
+    @general.retry_function(fatal_fail=True)
     def get_token(self, scope: str) -> dict[str]:
         """
         Get authorization token for the requested scope
@@ -52,27 +52,33 @@ class HaloAuthorizer:
             params=parameters)
 
         if not response.ok:         # Raise error to trigger retry
-            error_string = log.BadResponse(
+            log_entry = log.BadResponse(
                 method="POST",
                 url=self.url,
                 response=response,
                 context="HaloAuthorizer.get_token")
-            raise ConnectionError(error_string)
+            raise ConnectionError(log_entry)
         return response.json()
 
 
 class HaloInterface:
     """
     Interface for Halo API requests against a certain endpoint.
+    Dryrun: mock requests that actually edit something.
     Handles retries, logging, dryrun and pagination
     """
-    def __init__(self, url, endpoint: str, dryrun=False):
+    pagination_page_size = 50                                             # Parameters per page to get in pagination
+    record_count_parameter = "record_count"                   # Parameter name for record count in Halo API response
+    record_count_pattern = re.compile(rf"\"{record_count_parameter}\":\s*(\d+)")    # Regex pattern for record count
+
+    def __init__(self, url, endpoint: str, dryrun=False, fatal_fail=True):
         self.endpoint_url = url.strip("/") + "/" + endpoint
         self.dryrun = dryrun
-        if self.dryrun:
-            self.post = partial(self.mock_request, method="POST") #####################################
+        if dryrun:      # Replace post with mock function
+            self.post = self.mock_post
+        # Initialize request with retry decorator
+        self.request = general.retry_function(self.request, fatal_fail=fatal_fail)
 
-    @general.retry_function()
     def request(self, session: HaloSession, method: str, params: dict = None,
                 json: (list | dict) = None) -> (requests.Response, None):
         """
@@ -90,91 +96,86 @@ class HaloInterface:
             params=params,
             json=json)
 
-        self.logger.debug(get_log_string_request_sent(response))
-
-        if not response.ok:             # If request unsuccessful, raise error to trigger a retry
-            error_string = get_log_string_bad_response(method, self.endpoint_url, response)
-            raise ConnectionError(error_string)
-        else:
-            logger.debug(get_log_string_good_response(response))
-
+        if not response.ok:             # If request is unsuccessful, raise error to trigger a retry
+            log_entry = log.BadResponse(
+                method=method,
+                url=self.endpoint_url,
+                response=response,
+                context="HaloInterface.request")
+            raise ConnectionError(log_entry)
         return response
 
-    def mock_request(self, *args, **kwargs) -> requests.Response:
+    def mock_post(self, *args, **kwargs) -> requests.Response:
         """
-        Mock response generator. Used as replacement for editing actions in dryrun mode
-        :param kwargs: Normal request variables - included to debug log
-        :return: Mock response with status 201
+        Mock post response generator. Used as replacement for editing actions in dryrun mode
+        :return: Mock response with input parameters and status 201
         """
-        logger = logging.getLogger(self.log_name)
-        logger.debug(get_log_string_mock_request(self.endpoint_url, **kwargs))
-        logger.info("MOCK HTTP REQUEST. No action taken.")
+        response_json = {
+            "response": "mock post response",
+            "args": ", ".join(args)}
+        response_json.update(kwargs)
 
         mock_responses.start()
         mock_responses.add(            # Registers a mock response for the next request
             mock_responses.POST,
             re.compile(r".*"),
-            json={"response": "mock response"},
+            json=response_json,
             status=201)
 
         response = requests.post(self.endpoint_url)
         return response
 
-    def get(self, session: HaloSession, parameters: dict, **kwargs) -> list[requests.Response]:
+    def get(self, session: HaloSession, parameters: dict) -> list[requests.Response]:
         """
         Wrapper for self.request. Does a GET request with pagination handled
         :param session: HaloSession object
         :param parameters: Get request parameters
-        :param kwargs: Additional keyword parameters to supply optional log_name and fatal parameters to retry
         :return: List of responses from paginated replies
         """
-        pagination_page_size = 50
         parameters.update(
             pageinate=True,
-            page_size=pagination_page_size,
+            page_size=self.pagination_page_size,
             page_no=1)
 
         # Return a list of pages from paginated responses
-        record_count_parameter = "record_count"        # Parameter name for record count in Halo API response
-        record_count_pattern = re.compile(rf"\"{record_count_parameter}\":\s*(\d+)")
         responses = list()
         while True:
-            response = self.request(session=session, method="get", params=parameters, **kwargs)
-            if not int(record_count_pattern.findall(response.text)[0]):
+            response = self.request(
+                session=session,
+                method="GET",
+                params=parameters)
+            if not response or not int(self.record_count_pattern.findall(response.text)[0]):
                 break
             parameters["page_no"] += 1
             responses += [response]
         return responses
 
-    def get_all(self, field: str, session: HaloSession, parameters: dict, **kwargs) -> list[str]:
+    def get_all(self, field: str, session: HaloSession, parameters: dict) -> list[str]:
         """
         Wrapper for self.get. Parses a field from paginated responses and returns a list of these
         :param field: Field name in response json to parse (e.g. clients, toplevels)
         :param session: HaloSession object
         :param parameters: Get request parameters
-        :param kwargs: Additional keyword parameters to supply optional log_name and fatal parameters to retry
         :return: List of items from the requested field.
         """
-        responses = self.get(session=session, parameters=parameters, **kwargs)
+        responses = self.get(session=session, parameters=parameters)
         items = list()
         for page in responses:
             item = page.json()[field]
             items += item if isinstance(item, list) else [item]
         return items
 
-    def post(self, session: HaloSession, json: (list, dict) = None, **kwargs) -> requests.Response | None:
+    def post(self, session: HaloSession, json: (list, dict) = None) -> requests.Response | None:
         """
         Wrapper for self.request. Does a POST request with json payload
         :param session: HaloSession object
         :param json: Json data: dict or dict wrapped in list
-        :param kwargs: Additional keyword parameters to supply optional log_name and fatal parameters to retry
         :return: Response object if response succeeded. Else None
         """
         response = self.request(
             session=session,
-            method="post",
-            json=json,
-            **kwargs)
+            method="POST",
+            json=json)
         return response
 
 

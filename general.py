@@ -1,6 +1,6 @@
 
 # standard
-from functools import partial, wraps
+import functools
 import json
 import logging
 import os
@@ -12,25 +12,25 @@ import log
 
 
 def retry_function(function=None, *, n_retries: int = 3, interval_sec: float = 3.0,
-                   exceptions: (Exception, tuple[Exception]) = Exception, fatal=False):
+                   exceptions: (Exception, tuple[Exception]) = Exception, fatal_fail=True):
     """
     Decorator. Retries the wrapped function.
     :param function: Wrapped function
     :param n_retries: How many n_retries to retry
     :param interval_sec: Time between retries
     :param exceptions: Define exceptions that trigger a retry attempt (default: Exception, i.e. all)
-    :param fatal: Re-raise last exception after all retry attempts fail.
+    :param fatal_fail: Re-raise last exception after all retry attempts fail.
     :return: Function result or None, if it fails
     """
     if function is None:        # Enable decorating without arguments: @retry_function()
-        return partial(
+        return functools.partial(
             retry_function,
             n_retries=n_retries,
             interval_sec=interval_sec,
             exceptions=exceptions,
-            fatal=fatal)
+            fatal_fail=fatal_fail)
 
-    @wraps(function)
+    @functools.wraps(function)
     def retry(*args, **kwargs):
         attempt = 1
         while attempt <= n_retries:
@@ -58,7 +58,7 @@ def retry_function(function=None, *, n_retries: int = 3, interval_sec: float = 3
                     log_entry.record("WARNING")
 
                     attempt += 1
-                    if fatal:
+                    if fatal_fail:
                         raise exception
             else:
                 if attempt > 1:

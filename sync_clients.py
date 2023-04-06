@@ -57,30 +57,37 @@ SESSION_ID = general.generate_random_hex(8)
 # Set logging #
 ###############
 
-# Set data redaction patterns
+# Redaction filter
 redact_patterns = [
+    re.compile(os.getenv("NSIGHT_API_KEY"), flags=re.IGNORECASE),
     re.compile(os.getenv("HALO_API_TENANT"), flags=re.IGNORECASE),
     re.compile(os.getenv("HALO_API_CLIENT_ID"), flags=re.IGNORECASE),
     re.compile(os.getenv("HALO_API_CLIENT_SECRET"), flags=re.IGNORECASE)]
 
 redaction_filter = log.Redactor(patterns=redact_patterns)
 
-# Set log string formatting
+# Formatter
 formatter = log.StandardFormatter(
     indicator=ini_parameters["LOG_STRING_INDICATOR"],
     session_id=SESSION_ID,
     dryrun=DRYRUN)
 
+# Handler
 handler = logging.StreamHandler(sys.stdout)  # Direct logs to stdout
 handler.setFormatter(formatter)
 
+# Level
 log_level = ini_parameters["LOG_LEVEL"].upper()
 
-# Set level and handler to root logger
-logging.getLogger().setLevel(log_level)
-logging.getLogger().addHandler(handler)
+# initialize standard logger
+os.environ["LOGGER_NAME"] = ini_parameters["LOGGER_NAME"]
+logger = logging.getLogger(os.getenv("LOGGER_NAME", "root"))
 
+
+# Apply level to loggers
 # Capture HTTPConnection debug (replace print function in http.client.print)
+logging.getLogger().setLevel(log_level)
+
 if log_level == "DEBUG":
     def capture_print_output(*args) -> None:
         log_string = log.LogString(
@@ -91,18 +98,21 @@ if log_level == "DEBUG":
     http.client.print = capture_print_output
     http.client.HTTPConnection.debuglevel = 1
 
-# initialize standard logger
-os.environ["LOGGER_NAME"] = ini_parameters["LOGGER_NAME"]
-logger = logging.getLogger(os.getenv("LOGGER_NAME", "root"))
-
-# Set redaction filter to all loggers
-################################ Not working for urllib3.connectionpool logger
-# logging.root.manager.loggerDict has all known loggers except root logger
+# Remove all alternative handlers and set redaction filter to all loggers
+# logging.root.manager.loggerDict has all initialized loggers except root logger
 all_active_loggers = [logger for logger in logging.root.manager.loggerDict.values()
                       if not isinstance(logger, logging.PlaceHolder)]
 
+# Make sure only root logger has a handler
 for logger in all_active_loggers:
-    logger.addFilter(redaction_filter)
+    logger.handlers.clear()
+logging.getLogger().addHandler(handler)
+
+# Set redaction filter to loggers
+if bool(int(os.getenv("REDACT_LOGS", 1))):
+    for logger in all_active_loggers:
+        logger.addFilter(redaction_filter)
+    logging.getLogger().addFilter(redaction_filter)
 
 
 #############
@@ -134,6 +144,10 @@ halo_authorizer = halo_requests.HaloAuthorizer(
 
 halo_client_token = halo_authorizer.get_token(scope="edit:customers")
 
+# Add token to redacted patterns in logs
+halo_client_token_pattern = re.compile(rf"{halo_client_token['access_token']}")
+redaction_filter.add_pattern(halo_client_token_pattern)
+
 
 #######################
 # Get N-sight clients #
@@ -147,8 +161,6 @@ nsight_clients_raw = xml_ET.fromstring(nsight_clients_response.text).findall("./
 nsight_clients = [client_classes.NsightClient(client) for client in nsight_clients_raw]
 
 
-exit(0)
-
 ####################
 # Get Halo clients #
 ####################
@@ -156,19 +168,20 @@ exit(0)
 halo_client_session = halo_requests.HaloSession(halo_client_token)
 
 halo_client_api = halo_requests.HaloInterface(
-    url=env_parameters["HALO_API_URL"],
+    url=os.getenv("HALO_API_URL"),
     endpoint=ini_parameters["HALO_CLIENT_ENDPOINT"],
-    log_name=log_name,
-    dryrun=bool(env_parameters["DRYRUN"]))
+    dryrun=DRYRUN,
+    fatal_fail=True)             # Abort if a request fails, otherwise missing clients will be incorrectly determined
+
 
 halo_client_parameters = {"includeinactive": False}
 halo_clients_raw = halo_client_api.get_all(
     field="clients",
     session=halo_client_session,
-    parameters=halo_client_parameters,
-    fatal=True)             # Abort if a request fails, otherwise missing clients will be incorrectly determined
-
+    parameters=halo_client_parameters)
 halo_clients = [client_classes.HaloClient(client) for client in halo_clients_raw]
+
+exit(0)
 
 
 #######################################

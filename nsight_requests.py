@@ -7,7 +7,7 @@ import xml.etree.ElementTree as xml_ET      # xml parser
 import general
 
 
-@general.retry_function(fatal=False)
+@general.retry_function(fatal_fail=False)
 def get_clients(url: str, api_key: str) -> requests.Response:
     """
     https://documentation.n-able.com/remote-management/userguide/Content/listing_clients_.htm
