@@ -150,20 +150,20 @@ class HaloInterface:
             responses += [response]
         return responses
 
-    def get_all(self, field: str, session: HaloSession, parameters: dict) -> list[str]:
-        """
-        Wrapper for self.get. Parses a field from paginated responses and returns a list of these
-        :param field: Field name in response json to parse (e.g. clients, toplevels)
-        :param session: HaloSession object
-        :param parameters: Get request parameters
-        :return: List of items from the requested field.
-        """
-        responses = self.get(session=session, parameters=parameters)
-        items = list()
-        for page in responses:
-            item = page.json()[field]
-            items += item if isinstance(item, list) else [item]
-        return items
+    # def get_all(self, field: str, session: HaloSession, parameters: dict) -> list[str]:
+    #     """
+    #     Wrapper for self.get. Parses a field from paginated responses and returns a list of these
+    #     :param field: Field name in response json to parse (e.g. clients, toplevels)
+    #     :param session: HaloSession object
+    #     :param parameters: Get request parameters
+    #     :return: List of items from the requested field.
+    #     """
+    #     responses = self.get(session=session, parameters=parameters)
+    #     items = list()
+    #     for page in responses:
+    #         item = page.json()[field]
+    #         items += item if isinstance(item, list) else [item]
+    #     return items
 
     def post(self, session: HaloSession, json: (list, dict) = None) -> requests.Response | None:
         """
@@ -183,59 +183,59 @@ class HaloInterface:
 # Log string compilers #
 ########################
 
-def get_log_string_request_sent(response: requests.Response) -> str:
-    """
-    Compile detailed log string with sent request info
-    :param response: Response object returned by a request
-    :return: String to be used in log
-    """
-    headers = get_censored_headers(dict(response.request.headers))
-    log_string = f"Sent {response.request.method} request. " \
-                 f"URL: {response.request.url}. " \
-                 f"Headers: {headers}. " \
-                 f"Body: {response.request.body}."
-    return log_string
-
-
-def get_log_string_good_response(response: requests.Response) -> str:
-    """
-    Compile detailed log string with successful request response info
-    :param response: Response object returned by a request
-    :return: String to be used in log
-    """
-    log_string = f"Received response. Status: {response.status_code} ({response.reason}). " \
-                 f"Headers: {response.headers}. " \
-                 f"Body: {response.text[:200]}"
-    return log_string
-
-
-def get_log_string_mock_request(url: str, **kwargs) -> str:
-    """
-    Compile detailed log string for mock http request
-    :param url: Request url
-    :param kwargs: Request parameters. Handles following kwargs: method, session, json, parameters
-    :return: String to be used in log
-    """
-    method = kwargs.pop("method", "UNKNOWN METHOD")
-    session = kwargs.pop("session", requests.Session())
-    headers = get_censored_headers(dict(session.headers))
-    json = kwargs.pop("json", list())
-    parameters = kwargs.pop("parameters", dict())
-
-    log_string = f"MOCK {method.upper()} REQUEST. " \
-                 f"URL: {url}. " \
-                 f"Headers: {headers}. " \
-                 f"Parameters: {parameters} " \
-                 f"Body: {json}."
-    return log_string
-
-
-def get_censored_headers(headers: dict) -> dict:
-    """
-    Get request headers with removed security token info for log
-    :param headers: Dict of headers
-    :return: Modified dict with authorization info censored
-    """
-    authorization_key = [key for key in headers.keys() if key.lower() == "authorization"][0]
-    headers[authorization_key] = f"{headers[authorization_key][:10]}... *** sensitive info pruned from log ***"
-    return headers
+# def get_log_string_request_sent(response: requests.Response) -> str:
+#     """
+#     Compile detailed log string with sent request info
+#     :param response: Response object returned by a request
+#     :return: String to be used in log
+#     """
+#     headers = get_censored_headers(dict(response.request.headers))
+#     log_string = f"Sent {response.request.method} request. " \
+#                  f"URL: {response.request.url}. " \
+#                  f"Headers: {headers}. " \
+#                  f"Body: {response.request.body}."
+#     return log_string
+#
+#
+# def get_log_string_good_response(response: requests.Response) -> str:
+#     """
+#     Compile detailed log string with successful request response info
+#     :param response: Response object returned by a request
+#     :return: String to be used in log
+#     """
+#     log_string = f"Received response. Status: {response.status_code} ({response.reason}). " \
+#                  f"Headers: {response.headers}. " \
+#                  f"Body: {response.text[:200]}"
+#     return log_string
+#
+#
+# def get_log_string_mock_request(url: str, **kwargs) -> str:
+#     """
+#     Compile detailed log string for mock http request
+#     :param url: Request url
+#     :param kwargs: Request parameters. Handles following kwargs: method, session, json, parameters
+#     :return: String to be used in log
+#     """
+#     method = kwargs.pop("method", "UNKNOWN METHOD")
+#     session = kwargs.pop("session", requests.Session())
+#     headers = get_censored_headers(dict(session.headers))
+#     json = kwargs.pop("json", list())
+#     parameters = kwargs.pop("parameters", dict())
+#
+#     log_string = f"MOCK {method.upper()} REQUEST. " \
+#                  f"URL: {url}. " \
+#                  f"Headers: {headers}. " \
+#                  f"Parameters: {parameters} " \
+#                  f"Body: {json}."
+#     return log_string
+#
+#
+# def get_censored_headers(headers: dict) -> dict:
+#     """
+#     Get request headers with removed security token info for log
+#     :param headers: Dict of headers
+#     :return: Modified dict with authorization info censored
+#     """
+#     authorization_key = [key for key in headers.keys() if key.lower() == "authorization"][0]
+#     headers[authorization_key] = f"{headers[authorization_key][:10]}... *** sensitive info pruned from log ***"
+#     return headers

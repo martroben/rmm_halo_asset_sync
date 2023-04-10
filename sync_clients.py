@@ -99,11 +99,11 @@ if log_level == "DEBUG":
     http.client.HTTPConnection.debuglevel = 1
 
 # Remove all alternative handlers and set redaction filter to all loggers
+# Make sure only root logger has a handler
 # logging.root.manager.loggerDict has all initialized loggers except root logger
 all_active_loggers = [logger for logger in logging.root.manager.loggerDict.values()
                       if not isinstance(logger, logging.PlaceHolder)]
 
-# Make sure only root logger has a handler
 for logger in all_active_loggers:
     logger.handlers.clear()
 logging.getLogger().addHandler(handler)
@@ -173,15 +173,20 @@ halo_client_api = halo_requests.HaloInterface(
     dryrun=DRYRUN,
     fatal_fail=True)             # Abort if a request fails, otherwise missing clients will be incorrectly determined
 
-
 halo_client_parameters = {"includeinactive": False}
-halo_clients_raw = halo_client_api.get_all(
-    field="clients",
+halo_client_pages = halo_client_api.get(
     session=halo_client_session,
     parameters=halo_client_parameters)
-halo_clients = [client_classes.HaloClient(client) for client in halo_clients_raw]
 
-exit(0)
+# Parse client data field from response json
+client_data_field = "clients"
+halo_clients_raw = list()
+for page in halo_client_pages:
+    client_data = page.json()[client_data_field]
+    halo_clients_raw += client_data if isinstance(client_data, list) else [client_data]
+
+# Convert json to client object
+halo_clients = [client_classes.HaloClient(client) for client in halo_clients_raw]
 
 
 #######################################
@@ -189,29 +194,34 @@ exit(0)
 #######################################
 
 # Set toplevel id for N-sight clients if toplevel name is provided in .ini, and it exists in Halo
-nsight_toplevel = str(ini_parameters.get("NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
-if nsight_toplevel:
-    # Get Halo toplevels to get the id of the input toplevel
+nsight_clients_toplevel = str(ini_parameters.get("NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
+if nsight_clients_toplevel:        # Get Halo toplevels to get the id of the input toplevel
     halo_toplevel_api = halo_requests.HaloInterface(
-        url=env_parameters["HALO_API_URL"],
+        url=os.getenv("HALO_API_URL"),
         endpoint=ini_parameters["HALO_TOPLEVEL_ENDPOINT"],
-        log_name=log_name,
-        dryrun=bool(env_parameters["DRYRUN"]))
+        dryrun=DRYRUN,
+        fatal_fail=True)
 
     halo_toplevel_parameters = {"includeinactive": False}
-    halo_toplevels_raw = halo_toplevel_api.get_all(
-        field="tree",
+    halo_toplevel_pages = halo_toplevel_api.get(
         session=halo_client_session,
-        parameters=halo_toplevel_parameters)
+        parameters=halo_client_parameters)
 
-    halo_toplevels = [client_classes.HaloToplevel(toplevel) for toplevel in halo_toplevels_raw]
+    toplevel_data_field = "tree"
+    toplevels_raw = list()
+    for page in halo_toplevel_pages:
+        toplevel_data = page.json()[toplevel_data_field]
+        toplevels_raw += toplevel_data if isinstance(toplevel_data, list) else [toplevel_data]
 
-    nsight_toplevel_id = [toplevel.toplevel_id for toplevel in halo_toplevels if toplevel.name == nsight_toplevel][0]
+    halo_toplevels = [client_classes.HaloToplevel(toplevel) for toplevel in toplevels_raw]
+
+    nsight_toplevel_id = [toplevel.toplevel_id for toplevel in halo_toplevels
+                          if toplevel.name == nsight_clients_toplevel][0]
     for client in nsight_clients:
         client.toplevel_id = nsight_toplevel_id
 
     # Add toplevel_id as a comparison variable for Client class
-    # (only Clients with matching toplevel_id's are counted as equal)
+    # So that in comparing Clients, only Clients with matching toplevel_id's are counted as equal
     client_classes.Client.comparison_variables += ["toplevel_id"]
 
 
