@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import sqlite3
 import sys
 
 import requests
@@ -116,20 +117,17 @@ class LogString:
         if exception:
             self.exception = exception
             self.exception_type = exception.__class__.__name__
-        if context:
-            self.context = context
-        if full is None:
-            full = short
-
         self.short = short
-        self.full = full
+        self.full = full or short
+        self.context = context
 
     def __str__(self):
         return self.full
 
     def record(self, level: str) -> None:
         """"Execute" the log message - i.e. send it to the specified handler"""
-        log_message = f"[{self.context}] {self.full}"
+        context = f"[{self.context}] " if self.context else ""
+        log_message = f"{context}{self.full}"
         self.logger.log(
             level=logging.getLevelName(level.upper()),
             msg=log_message)
@@ -144,6 +142,75 @@ class EnvVariablesMissing(LogString):
     def __init__(self, missing_variables: list):
         short = "Critical env variables not found."
         full = f"{short} Missing variables: {', '.join(missing_variables)}. Exiting."
+        super().__init__(short, full)
+
+
+class NoMatchingToplevel(LogString):
+    """No matching toplevel found in Halo."""
+    def __init__(self, toplevel_name: str):
+        short = "No matching toplevel in Halo."
+        full = f"{short} Toplevel: {toplevel_name}. Ignoring toplevels."
+        super().__init__(short, full)
+
+
+class NoMissingClients(LogString):
+    """All N-sight clients are already present in Halo."""
+    def __init__(self):
+        short = "All N-sight clients already exist in Halo. Exiting with no action."
+        super().__init__(short)
+
+
+class ClientInsertBackup(LogString):
+    """Info about backup action starting."""
+    def __init__(self, client: str, backup_id: str):
+        short = "Inserting client to SQL backup table."
+        full = f"{short} Client: {client}. Backup id: {backup_id}."
+        super().__init__(short, full)
+
+
+class ClientInsertBackupSuccess(LogString):
+    """Info about successful backup action."""
+    def __init__(self):
+        short = "Successfully inserted client to SQL backup table."
+        super().__init__(short)
+
+
+class ClientInsertBackupFail(LogString):
+    """Client backup failed."""
+    def __init__(self, client: str, backup_id: str, error: sqlite3.Error):
+        short = "SQL error while adding new Client to Halo."
+        full = f"{short} Client: {client}. Backup id: {backup_id}. Error: {error}"
+        super().__init__(short, full)
+
+
+class InsertNClients(LogString):
+    """Info about n un-synced clients found from N-sight."""
+    def __init__(self, n_clients: int):
+        short = "Found N-sight clients that are not synced to Halo."
+        full = f"{short} Count: {n_clients}."
+        super().__init__(short, full)
+
+
+class ClientInsert(LogString):
+    """Info about adding new client to Halo."""
+    def __init__(self, client: str):
+        short = "Adding new client to Halo."
+        full = f"{short} Client: {client}."
+        super().__init__(short, full)
+
+
+class ClientInsertSuccess(LogString):
+    """Info about client successfully added to Halo."""
+    def __init__(self):
+        short = "Successfully added client."
+        super().__init__(short)
+
+
+class ClientInsertFail(LogString):
+    """Adding client to Halo failed."""
+    def __init__(self, client: str):
+        short = "Failed to add new client to Halo."
+        full = f"{short} Client: {client}."
         super().__init__(short, full)
 
 
@@ -194,29 +261,29 @@ class BadResponse(LogString):
 
 # sqlite3.OperationalError
 
-def sql_read_table_syntax(sql_statement: str) -> str:
-    return f"Selecting from table by SQL statement: {sql_statement}"
-
-
-def sql_insert_row_syntax(sql_statement: str) -> str:
-    return f"Inserting row by SQL statement: {sql_statement}"
-
-
-def sql_update_row_syntax(sql_statement: str) -> str:
-    return f"Updating row by SQL statement: {sql_statement}"
-
-
-def sql_get_table_info(sql_statement: str) -> str:
-    return f"Getting table info by SQL statement: {sql_statement}"
-
-
-def sql_get_table_row_count(sql_statement: str) -> str:
-    return f"Getting table row count by SQL statement: {sql_statement}"
-
-
-def sql_nonexisting_table(sql_statement: str) -> str:
-    return f"Tried to query non-existing table. SQL statement: {sql_statement}"
-
-
-def sql_table_initiation_error():
-    pass
+# def sql_read_table_syntax(sql_statement: str) -> str:
+#     return f"Selecting from table by SQL statement: {sql_statement}"
+#
+#
+# def sql_insert_row_syntax(sql_statement: str) -> str:
+#     return f"Inserting row by SQL statement: {sql_statement}"
+#
+#
+# def sql_update_row_syntax(sql_statement: str) -> str:
+#     return f"Updating row by SQL statement: {sql_statement}"
+#
+#
+# def sql_get_table_info(sql_statement: str) -> str:
+#     return f"Getting table info by SQL statement: {sql_statement}"
+#
+#
+# def sql_get_table_row_count(sql_statement: str) -> str:
+#     return f"Getting table row count by SQL statement: {sql_statement}"
+#
+#
+# def sql_nonexisting_table(sql_statement: str) -> str:
+#     return f"Tried to query non-existing table. SQL statement: {sql_statement}"
+#
+#
+# def sql_table_initiation_error():
+#     pass

@@ -220,8 +220,10 @@ def update_rows(table: str, connection: sqlite3.Connection, where: tuple = None,
         """
 
     if where:
-        placeholder_values += where[1]
-        sql_statement = sql_statement.replace(";", f"WHERE {where[0]};")
+        where_statement = where[0]
+        where_placeholder_values = tuple(where[1])
+        placeholder_values += where_placeholder_values
+        sql_statement = sql_statement.replace(";", f"WHERE {where_statement};")
 
     sql_cursor.execute(sql_statement, placeholder_values)
     connection.commit()

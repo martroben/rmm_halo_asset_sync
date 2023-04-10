@@ -189,9 +189,9 @@ for page in halo_client_pages:
 halo_clients = [client_classes.HaloClient(client) for client in halo_clients_raw]
 
 
-#######################################
-# Handle N-sight toplevel if supplied #
-#######################################
+########################################
+# Handle N-sight toplevel, if supplied #
+########################################
 
 # Set toplevel id for N-sight clients if toplevel name is provided in .ini, and it exists in Halo
 nsight_clients_toplevel = str(ini_parameters.get("NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
@@ -208,21 +208,24 @@ if nsight_clients_toplevel:        # Get Halo toplevels to get the id of the inp
         parameters=halo_client_parameters)
 
     toplevel_data_field = "tree"
-    toplevels_raw = list()
+    existing_toplevels_raw = list()
     for page in halo_toplevel_pages:
         toplevel_data = page.json()[toplevel_data_field]
-        toplevels_raw += toplevel_data if isinstance(toplevel_data, list) else [toplevel_data]
+        existing_toplevels_raw += toplevel_data if isinstance(toplevel_data, list) else [toplevel_data]
 
-    halo_toplevels = [client_classes.HaloToplevel(toplevel) for toplevel in toplevels_raw]
+    existing_toplevels = [client_classes.HaloToplevel(toplevel) for toplevel in existing_toplevels_raw]
+    nsight_toplevel_match = [toplevel for toplevel in existing_toplevels
+                             if toplevel.name == nsight_clients_toplevel]
 
-    nsight_toplevel_id = [toplevel.toplevel_id for toplevel in halo_toplevels
-                          if toplevel.name == nsight_clients_toplevel][0]
-    for client in nsight_clients:
-        client.toplevel_id = nsight_toplevel_id
-
-    # Add toplevel_id as a comparison variable for Client class
-    # So that in comparing Clients, only Clients with matching toplevel_id's are counted as equal
-    client_classes.Client.comparison_variables += ["toplevel_id"]
+    if nsight_toplevel_match:
+        nsight_toplevel_id = nsight_toplevel_match[0].toplevel_id
+        for client in nsight_clients:
+            client.toplevel_id = nsight_toplevel_id
+        # Add toplevel_id as a comparison variable for Client class
+        # so that when comparing Clients, only Clients with matching toplevel_id's are counted as equal
+        client_classes.Client.comparison_variables += ["toplevel_id"]
+    else:
+        log.NoMatchingToplevel(nsight_clients_toplevel).record("WARNING")
 
 
 #################################
@@ -230,54 +233,52 @@ if nsight_clients_toplevel:        # Get Halo toplevels to get the id of the inp
 #################################
 
 missing_clients = [client for client in nsight_clients if client not in halo_clients]
+if not missing_clients:
+    log.NoMissingClients().record("INFO")
+    exit(0)
 
 
 ########################
 # Post missing clients #
 ########################
 
-if not missing_clients:
-    exit(0)
-
-logger.info(f"Found N-sight Clients that are not synced to Halo. " 
-            f"Count: {len(missing_clients)}")
+log.InsertNClients(n_clients=len(missing_clients)).record("INFO")
+halo_client_api.set_retry_policy(fatal_fail=False)      # If posting one Client to Halo fails, still try to post others
 
 for client in missing_clients:
-    logger.info(f"Adding new Client to Halo: {str(client)}")
+    log.ClientInsert(client=client.name).record("INFO")
     backup_id = general.generate_random_hex(8)
 
     try:                                        # Only post if backup is successful
-        logger.info(f"Backing up Client. Backup id: {backup_id}")
-        backup_data = json.dumps([client.get_post_payload()])
+        log.ClientInsertBackup(client=client.name, backup_id=backup_id).record("DEBUG")
+        client_post_data = [client.get_post_payload()]          # Halo post accepts dict wrapped in a list
         sql_backup_table.insert(
             session_id=SESSION_ID,
             backup_id=backup_id,
             action="insert",
             old="",
-            new=backup_data,
+            new=json.dumps(client_post_data),
             post_successful=0)
-        logger.debug(f"End of Client backup action.")
+        log.ClientInsertBackupSuccess().record("DEBUG")
 
-        logger.debug(f"Posting Client to Halo.")
         response = halo_client_api.post(
             session=halo_client_session,
-            json=[client.get_post_payload()],   # Halo post accepts dict wrapped in a list
-            fatal=False)                        # Don't abort, even if one post request fails
+            json=client_post_data)
 
         if response:
-            logger.debug(f"Post successful.")
             sql_backup_table.update(
                 column="post_successful",
                 value=1,
                 where=f'backup_id == "{backup_id}"')
         else:
-            logger.warning(f"Posting Client failed. {client}, "
-                           f"Action id: {backup_id}")
+            log.ClientInsertFail(client=client.name).record("WARNING")
+            continue
 
     except sqlite3.Error as sql_error:         # Catch cases where Client is not posted, because backup action failed
-        logger.warning(f"SQL error while adding new Client to Halo. Client: {str(client)}. Error: {sql_error}")
+        log.ClientInsertBackupFail(client=client.name, backup_id=backup_id, error=sql_error).record("WARNING")
+        continue
 
-    logger.debug(f"End of adding new Client to Halo action.")
+    log.ClientInsertSuccess().record("INFO")
 
 
 

@@ -79,6 +79,16 @@ class HaloInterface:
         # Initialize request with retry decorator
         self.request = general.retry_function(self.request, fatal_fail=fatal_fail)
 
+    def set_retry_policy(self, n_retries: int = 3, interval_sec: float = 3.0,
+                         exceptions: (Exception, tuple[Exception]) = Exception, fatal_fail=True):
+        """Change retry policy of an existing instance."""
+        self.request = general.retry_function(
+            self.request,
+            n_retries=n_retries,
+            interval_sec=interval_sec,
+            exceptions=exceptions,
+            fatal_fail=fatal_fail)
+
     def request(self, session: HaloSession, method: str, params: dict = None,
                 json: (list | dict) = None) -> (requests.Response, None):
         """
