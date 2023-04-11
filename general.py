@@ -43,8 +43,7 @@ def retry_function(function=None, *, n_retries: int = 3, interval_sec: float = 3
                         exception=exception,
                         n_retries=n_retries,
                         interval_sec=interval_sec,
-                        attempt=attempt,
-                        context=function.__name__)
+                        attempt=attempt)
                     log_entry.record("DEBUG")
 
                     attempt += 1
@@ -53,8 +52,7 @@ def retry_function(function=None, *, n_retries: int = 3, interval_sec: float = 3
                     log_entry = log.RetryFailed(
                         function=function,
                         exception=exception,
-                        n_retries=n_retries,
-                        context=function.__name__)
+                        n_retries=n_retries)
                     log_entry.record("WARNING")
 
                     attempt += 1
@@ -62,8 +60,7 @@ def retry_function(function=None, *, n_retries: int = 3, interval_sec: float = 3
                         raise exception
             else:
                 if attempt > 1:
-                    log_entry = log.LogString("Retry successful!", context=function.__name__)
-                    log_entry.record("INFO")
+                    log.LogString("Retry successful!", context=function.__name__).record("INFO")
                 return response
     return retry
 

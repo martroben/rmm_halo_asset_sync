@@ -1,14 +1,10 @@
 # standard
 from datetime import datetime
-import http.client
 import json
 import logging
 import os
 import re
 import sqlite3
-import sys
-# external
-import xml.etree.ElementTree as xml_ET              # xml parser
 # local
 import client_classes
 import general
@@ -44,75 +40,45 @@ required_env_variables = [
 
 missing_env_variables = [variable for variable in required_env_variables if os.getenv(variable, None) is None]
 if missing_env_variables:
-    log_entry = log.EnvVariablesMissing(missing_env_variables)
-    log_entry.record("ERROR")
+    log.EnvVariablesMissing(missing_env_variables).record("ERROR")
     exit(1)
 
 # Global variables
 DRYRUN = bool(int(os.getenv("DRYRUN", 1)))
 SESSION_ID = general.generate_random_hex(8)
+REDACT_FILTER: log.Redactor
 
 
-###############
-# Set logging #
-###############
+#################
+# Setup logging #
+#################
 
-# Redaction filter
+# logging.root.manager.loggerDict has all initialized loggers except root logger
+all_active_loggers = [logger for logger in logging.root.manager.loggerDict.values()
+                      if not isinstance(logger, logging.PlaceHolder)]
+
+# Send all logs to stdout
+log.set_logs_to_stdout(all_active_loggers)
+
+# Set formatter to all logs
+formatter = log.StandardFormatter(
+    indicator=ini_parameters["LOG_STRING_INDICATOR"],
+    session_id=SESSION_ID,
+    dryrun=DRYRUN)
+log.set_formatter(formatter, all_active_loggers)
+
+# Set level
+log.set_level(logging.getLevelName(ini_parameters["LOG_LEVEL"].upper()), all_active_loggers)
+
+# Set redact filter
 redact_patterns = [
     re.compile(os.getenv("NSIGHT_API_KEY"), flags=re.IGNORECASE),
     re.compile(os.getenv("HALO_API_TENANT"), flags=re.IGNORECASE),
     re.compile(os.getenv("HALO_API_CLIENT_ID"), flags=re.IGNORECASE),
     re.compile(os.getenv("HALO_API_CLIENT_SECRET"), flags=re.IGNORECASE)]
-
-redaction_filter = log.Redactor(patterns=redact_patterns)
-
-# Formatter
-formatter = log.StandardFormatter(
-    indicator=ini_parameters["LOG_STRING_INDICATOR"],
-    session_id=SESSION_ID,
-    dryrun=DRYRUN)
-
-# Handler
-handler = logging.StreamHandler(sys.stdout)  # Direct logs to stdout
-handler.setFormatter(formatter)
-
-# Level
-log_level = ini_parameters["LOG_LEVEL"].upper()
-
-# initialize standard logger
-os.environ["LOGGER_NAME"] = ini_parameters["LOGGER_NAME"]
-logger = logging.getLogger(os.getenv("LOGGER_NAME", "root"))
-
-
-# Apply level to loggers
-# Capture HTTPConnection debug (replace print function in http.client.print)
-logging.getLogger().setLevel(log_level)
-
-if log_level == "DEBUG":
-    def capture_print_output(*args) -> None:
-        log_string = log.LogString(
-            short=" ".join(args),
-            context="http.client.HTTPConnection debug")
-        log_string.record("DEBUG")
-
-    http.client.print = capture_print_output
-    http.client.HTTPConnection.debuglevel = 1
-
-# Remove all alternative handlers and set redaction filter to all loggers
-# Make sure only root logger has a handler
-# logging.root.manager.loggerDict has all initialized loggers except root logger
-all_active_loggers = [logger for logger in logging.root.manager.loggerDict.values()
-                      if not isinstance(logger, logging.PlaceHolder)]
-
-for logger in all_active_loggers:
-    logger.handlers.clear()
-logging.getLogger().addHandler(handler)
-
-# Set redaction filter to loggers
+REDACT_FILTER = log.Redactor(patterns=redact_patterns)      # Used globally to add additional redacted patterns
 if bool(int(os.getenv("REDACT_LOGS", 1))):
-    for logger in all_active_loggers:
-        logger.addFilter(redaction_filter)
-    logging.getLogger().addFilter(redaction_filter)
+    log.set_filter(REDACT_FILTER, all_active_loggers)
 
 
 #############
@@ -122,10 +88,12 @@ if bool(int(os.getenv("REDACT_LOGS", 1))):
 # Use in-memory SQL for dry-run
 sql_database_path = ":memory:" if DRYRUN else ini_parameters["SQL_DATABASE_PATH"]
 
+log.SqlSetupBegin(sql_database_path).record("INFO")
 sql_sessions_table = SqlTableSessions(sql_database_path)
 sql_backup_table = SqlTableBackup(sql_database_path)
 
 # Insert session info to SQL
+log.SqlInsertSessionInfo(SESSION_ID).record("INFO")
 sql_sessions_table.insert(
     session_id=SESSION_ID,
     time_unix=int(datetime.now().timestamp()),
@@ -136,29 +104,39 @@ sql_sessions_table.insert(
 # Get Halo token #
 ##################
 
-halo_authorizer = halo_requests.HaloAuthorizer(
+log.HaloTokenRequestBegin().record("INFO")
+halo_authorizer = halo_requests.HaloAuthorizer(         # Uses fatal fail in retry
     url=os.getenv("HALO_API_AUTHENTICATION_URL"),
     tenant=os.getenv("HALO_API_TENANT"),
     client_id=os.getenv("HALO_API_CLIENT_ID"),
     secret=os.getenv("HALO_API_CLIENT_SECRET"))
 
-halo_client_token = halo_authorizer.get_token(scope="edit:customers")
+halo_client_token = dict()
+try:
+    halo_client_token = halo_authorizer.get_token(scope="edit:customers")
+except ConnectionError as connection_error:
+    log.HaloTokenRequestFail(connection_error).record("ERROR")
+    exit(1)
 
-# Add token to redacted patterns in logs
+if not halo_client_token:
+    log.HaloTokenRequestFail()
+    exit(1)
+
+# Add Halo token to log redact patterns
 halo_client_token_pattern = re.compile(rf"{halo_client_token['access_token']}")
-redaction_filter.add_pattern(halo_client_token_pattern)
+REDACT_FILTER.add_pattern(halo_client_token_pattern)
 
 
 #######################
 # Get N-sight clients #
 #######################
 
+################## logging
 nsight_clients_response = nsight_requests.get_clients(          # Uses non-fatal retry
     url=os.getenv("NSIGHT_BASE_URL"),
     api_key=os.getenv("NSIGHT_API_KEY"))
 
-nsight_clients_raw = xml_ET.fromstring(nsight_clients_response.text).findall("./items/client")
-nsight_clients = [client_classes.NsightClient(client) for client in nsight_clients_raw]
+nsight_clients = nsight_requests.parse_clients(nsight_clients_response)
 
 
 ####################
@@ -243,10 +221,10 @@ if not missing_clients:
 ########################
 
 log.InsertNClients(n_clients=len(missing_clients)).record("INFO")
-halo_client_api.set_retry_policy(fatal_fail=False)      # If posting one Client to Halo fails, still try to post others
+halo_client_api.update_retry_policy(fatal_fail=False)   # If posting one Client to Halo fails, still try to post others
 
 for client in missing_clients:
-    log.ClientInsert(client=client.name).record("INFO")
+    log.ClientInsertBegin(client=client.name).record("INFO")
     backup_id = general.generate_random_hex(8)
 
     try:                                        # Only post if backup is successful
@@ -279,8 +257,3 @@ for client in missing_clients:
         continue
 
     log.ClientInsertSuccess().record("INFO")
-
-
-
-########################### restore test
-# json.dumps(sql_backup_table.read()[-1])

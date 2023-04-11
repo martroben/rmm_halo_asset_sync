@@ -79,15 +79,15 @@ class HaloInterface:
         # Initialize request with retry decorator
         self.request = general.retry_function(self.request, fatal_fail=fatal_fail)
 
-    def set_retry_policy(self, n_retries: int = 3, interval_sec: float = 3.0,
-                         exceptions: (Exception, tuple[Exception]) = Exception, fatal_fail=True):
-        """Change retry policy of an existing instance."""
-        self.request = general.retry_function(
-            self.request,
-            n_retries=n_retries,
-            interval_sec=interval_sec,
-            exceptions=exceptions,
-            fatal_fail=fatal_fail)
+    def update_retry_policy(self, **kwargs):
+        """
+        Change retry policy of an existing instance.
+        Updates the values in wrapped self.request function closure cell.
+        """
+        for argument_name, argument_value in kwargs.items():
+            if argument_name in self.request.__code__.co_freevars:
+                argument_index = self.request.__code__.co_freevars.index(argument_name)
+                self.request.__closure__[argument_index].cell_contents = argument_value
 
     def request(self, session: HaloSession, method: str, params: dict = None,
                 json: (list | dict) = None) -> (requests.Response, None):
@@ -187,6 +187,38 @@ class HaloInterface:
             method="POST",
             json=json)
         return response
+
+
+
+
+def request(session, method: str, params: dict = None,
+            json: (list | dict) = None):
+    """
+    Method to perform the actual requests. Handles logging and retries
+    :param session: HaloSession object.
+    :param method: Request method (e.g. get, post...)
+    :param params: Request parameters (for GET requests)
+    :param json: Dict for json content (for POST requests)
+    If not provided in function, retry function attempts to read these from instance variables.
+    :return: Response object or None if request fails
+    """
+    response = session.request(
+        method=method,
+        url=endpoint_url,
+        params=params,
+        json=json)
+
+    if not response.ok:             # If request is unsuccessful, raise error to trigger a retry
+        log_entry = log.BadResponse(
+            method=method,
+            url=endpoint_url,
+            response=response,
+            context="HaloInterface.request")
+        raise ConnectionError(log_entry)
+    return response
+
+fn = general.retry_function(request, fatal_fail=True)
+
 
 
 ########################

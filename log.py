@@ -203,6 +203,37 @@ class EnvVariablesMissing(LogString):
         super().__init__(short, full)
 
 
+class SqlSetupBegin(LogString):
+    """Info about beginning SQL setup."""
+    def __init__(self, path):
+        short = "Connecting to SQL."
+        full = f"{short} SQL path: {path}."
+        super().__init__(short, full)
+
+
+class SqlInsertSessionInfo(LogString):
+    """Info about inserting session info to SQL."""
+    def __init__(self, session_id):
+        short = "Inserting session info to SQL."
+        full = f"{short} Session ID: {session_id}."
+        super().__init__(short, full)
+
+
+class HaloTokenRequestBegin(LogString):
+    """Info about requesting Halo token."""
+    def __init__(self):
+        short = "Requesting Halo token."
+        super().__init__(short)
+
+
+class HaloTokenRequestFail(LogString):
+    """Token request fail message."""
+    def __init__(self, connection_error: Exception = None):
+        short = "Failed to get Halo API token."
+        full = f"{short} Error: {connection_error}. Exiting." or ""
+        super().__init__(short, full)
+
+
 class NoMatchingToplevel(LogString):
     """No matching toplevel found in Halo."""
     def __init__(self, toplevel_name: str):
@@ -249,7 +280,7 @@ class InsertNClients(LogString):
         super().__init__(short, full)
 
 
-class ClientInsert(LogString):
+class ClientInsertBegin(LogString):
     """Info about adding new client to Halo."""
     def __init__(self, client: str):
         short = "Adding new client to Halo."
@@ -288,19 +319,19 @@ class SqlCreateTableSyntax(LogString):
 
 class RetryAttempt(LogString):
     """Detailed log string for retry attempt."""
-    def __init__(self, function, exception: Exception, n_retries: int, interval_sec: float, attempt: int, context: str):
+    def __init__(self, function, exception: Exception, n_retries: int, interval_sec: float, attempt: int):
         short = f"Retrying function '{function.__name__}' in {round(interval_sec, 2)} seconds, " \
                 f"because {type(exception).__name__} occurred. Attempt {attempt} of {n_retries}."
         full = f"{short} Exception: {exception}"
-        super().__init__(short=short, full=full, exception=exception, context=context)
+        super().__init__(short=short, full=full, exception=exception)
 
 
 class RetryFailed(LogString):
     """Failed retry log entry."""
-    def __init__(self, function, exception: Exception, n_retries: int, context: str):
+    def __init__(self, function, exception: Exception, n_retries: int):
         short = f"Retrying function '{function.__name__}' failed after {n_retries} attempts, " \
                  f"because {type(exception).__name__} occurred."
-        super().__init__(short=short, exception=exception, context=context)
+        super().__init__(short=short, exception=exception)
 
 
 #############################
