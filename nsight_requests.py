@@ -31,6 +31,8 @@ def parse_clients(clients_response: requests.Response) -> list[client_classes.Ns
     :param clients_response:
     :return:
     """
+    if not clients_response:
+        return []
     clients_raw = xml_ET.fromstring(clients_response.text).findall("./items/client")
     clients = [client_classes.NsightClient(client) for client in clients_raw]
     return clients

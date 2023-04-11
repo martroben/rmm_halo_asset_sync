@@ -131,12 +131,11 @@ REDACT_FILTER.add_pattern(halo_client_token_pattern)
 # Get N-sight clients #
 #######################
 
-################## logging
+log.NsightClientsRequestBegin().record("INFO")
 nsight_clients_response = nsight_requests.get_clients(          # Uses non-fatal retry
     url=os.getenv("NSIGHT_BASE_URL"),
     api_key=os.getenv("NSIGHT_API_KEY"))
-
-nsight_clients = nsight_requests.parse_clients(nsight_clients_response)
+nsight_clients = nsight_requests.parse_clients(nsight_clients_response) if nsight_clients_response else []
 
 
 ####################

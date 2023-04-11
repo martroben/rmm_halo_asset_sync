@@ -234,6 +234,13 @@ class HaloTokenRequestFail(LogString):
         super().__init__(short, full)
 
 
+class NsightClientsRequestBegin(LogString):
+    """Info about requesting N-sight clients."""
+    def __init__(self):
+        short = "Requesting N-sight clients."
+        super().__init__(short)
+
+
 class NoMatchingToplevel(LogString):
     """No matching toplevel found in Halo."""
     def __init__(self, toplevel_name: str):
@@ -245,7 +252,7 @@ class NoMatchingToplevel(LogString):
 class NoMissingClients(LogString):
     """All N-sight clients are already present in Halo."""
     def __init__(self):
-        short = "All N-sight clients already exist in Halo. Exiting with no action."
+        short = "No new N-sight clients found. Exiting with no action."
         super().__init__(short)
 
 
