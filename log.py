@@ -1,12 +1,70 @@
 
 # standard
+import http.client
 import logging
 import os
 import re
+import requests
 import sqlite3
 import sys
 
-import requests
+
+def set_logs_to_stdout(loggers: list[logging.Logger]) -> None:
+    """
+    Remove all alternative handlers and make sure only root logger has a handler.
+    :return:
+    """
+    handler = logging.StreamHandler(sys.stdout)  # Direct logs to stdout
+    for logger in loggers:
+        logger.handlers.clear()
+    logging.getLogger().addHandler(handler)
+
+
+def set_formatter(formatter: logging.Formatter, loggers: list[logging.Logger]) -> None:
+    """
+    Set formatter to all loggers
+    :param formatter:
+    :param loggers:
+    :return:
+    """
+    for logger in loggers:
+        for handler in logger.handlers:
+            handler.setFormatter(formatter)
+
+
+def set_level(level: int, loggers: list[logging.Logger]) -> None:
+    """
+    Set log level globally.
+    :param loggers:
+    :param level:
+    :return:
+    """
+    for logger in loggers:
+        logger.setLevel(level)
+    logging.getLogger().setLevel(level)
+
+    if level <= logging.getLevelName("DEBUG"):
+        # Replace print method to capture http request logs
+        def capture_print_output(*args) -> None:
+            log_string = LogString(
+                short=" ".join(args),
+                context="http.client.HTTPConnection debug")
+            log_string.record("DEBUG")
+
+        http.client.print = capture_print_output
+        http.client.HTTPConnection.debuglevel = 1
+
+
+def set_filter(log_filter: logging.Filter, loggers: list[logging.Logger]) -> None:
+    """
+    Apply filter to all loggers.
+    :param log_filter:
+    :param loggers:
+    :return:
+    """
+    for logger in loggers:
+        logger.addFilter(log_filter)
+    logging.getLogger().addFilter(log_filter)
 
 
 class Redactor(logging.Filter):
