@@ -4,6 +4,7 @@ import requests
 # external
 import xml.etree.ElementTree as xml_ET      # xml parser
 # local
+import client_classes
 import general
 
 
@@ -22,3 +23,14 @@ def get_clients(url: str, api_key: str) -> requests.Response:
     response = requests.get(url, params=parameters)
     response.encoding = "latin_1"
     return response
+
+
+def parse_clients(clients_response: requests.Response) -> list[client_classes.NsightClient]:
+    """
+
+    :param clients_response:
+    :return:
+    """
+    clients_raw = xml_ET.fromstring(clients_response.text).findall("./items/client")
+    clients = [client_classes.NsightClient(client) for client in clients_raw]
+    return clients
