@@ -8,6 +8,7 @@ import requests
 # external
 import responses as mock_responses
 # local
+import client_classes
 import general
 import log
 
@@ -189,36 +190,37 @@ class HaloInterface:
         return response
 
 
-
-
-def request(session, method: str, params: dict = None,
-            json: (list | dict) = None):
+def parse_clients(clients_response: list[requests.Response]) -> list[client_classes.HaloClient]:
     """
-    Method to perform the actual requests. Handles logging and retries
-    :param session: HaloSession object.
-    :param method: Request method (e.g. get, post...)
-    :param params: Request parameters (for GET requests)
-    :param json: Dict for json content (for POST requests)
-    If not provided in function, retry function attempts to read these from instance variables.
-    :return: Response object or None if request fails
+    Parse Halo client objects from request response data.
+    :param clients_response:
+    :return:
     """
-    response = session.request(
-        method=method,
-        url=endpoint_url,
-        params=params,
-        json=json)
+    client_data_field = "clients"
+    clients_raw = list()
+    for page in clients_response:
+        client_data = page.json()[client_data_field]
+        clients_raw += client_data if isinstance(client_data, list) else [client_data]
 
-    if not response.ok:             # If request is unsuccessful, raise error to trigger a retry
-        log_entry = log.BadResponse(
-            method=method,
-            url=endpoint_url,
-            response=response,
-            context="HaloInterface.request")
-        raise ConnectionError(log_entry)
-    return response
+    # Convert json to client object
+    clients = [client_classes.HaloClient(client) for client in clients_raw]
+    return clients
 
-fn = general.retry_function(request, fatal_fail=True)
 
+def parse_toplevels(toplevels_response: list[requests.Response]) -> list[client_classes.HaloToplevel]:
+    """
+
+    :param toplevels_response:
+    :return:
+    """
+    toplevels_data_field = "tree"
+    toplevels_raw = list()
+    for page in toplevels_response:
+        toplevel_data = page.json()[toplevels_data_field]
+        toplevels_raw += toplevel_data if isinstance(toplevel_data, list) else [toplevel_data]
+
+    toplevels = [client_classes.HaloToplevel(toplevel) for toplevel in toplevels_raw]
+    return toplevels
 
 
 ########################

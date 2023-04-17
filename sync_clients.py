@@ -104,16 +104,23 @@ sql_sessions_table.insert(
 # Get Halo token #
 ##################
 
+# Inputs
+halo_api_authentication_url = os.getenv("HALO_API_AUTHENTICATION_URL")
+halo_api_tenant = os.getenv("HALO_API_TENANT")
+halo_api_client_id = os.getenv("HALO_API_CLIENT_ID")
+halo_api_client_secret = os.getenv("HALO_API_CLIENT_SECRET")
+halo_api_token_scope = "edit:customers"
+
 log.HaloTokenRequestBegin().record("INFO")
 halo_authorizer = halo_requests.HaloAuthorizer(         # Uses fatal fail in retry
-    url=os.getenv("HALO_API_AUTHENTICATION_URL"),
-    tenant=os.getenv("HALO_API_TENANT"),
-    client_id=os.getenv("HALO_API_CLIENT_ID"),
-    secret=os.getenv("HALO_API_CLIENT_SECRET"))
+    url=halo_api_authentication_url,
+    tenant=halo_api_tenant,
+    client_id=halo_api_client_id,
+    secret=halo_api_client_secret)
 
 halo_client_token = dict()
 try:
-    halo_client_token = halo_authorizer.get_token(scope="edit:customers")
+    halo_client_token = halo_authorizer.get_token(scope=halo_api_token_scope)
 except ConnectionError as connection_error:
     log.HaloTokenRequestFail(connection_error).record("ERROR")
     exit(1)
@@ -131,10 +138,15 @@ REDACT_FILTER.add_pattern(halo_client_token_pattern)
 # Get N-sight clients #
 #######################
 
+# Inputs
+nsight_base_url = os.getenv("NSIGHT_BASE_URL")
+nsight_api_key = os.getenv("NSIGHT_API_KEY")
+
 log.NsightClientsRequestBegin().record("INFO")
 nsight_clients_response = nsight_requests.get_clients(          # Uses non-fatal retry
-    url=os.getenv("NSIGHT_BASE_URL"),
-    api_key=os.getenv("NSIGHT_API_KEY"))
+    url=nsight_base_url,
+    api_key=nsight_api_key)
+# Assign empty list if request failed
 nsight_clients = nsight_requests.parse_clients(nsight_clients_response) if nsight_clients_response else []
 
 
@@ -142,28 +154,32 @@ nsight_clients = nsight_requests.parse_clients(nsight_clients_response) if nsigh
 # Get Halo clients #
 ####################
 
-halo_client_session = halo_requests.HaloSession(halo_client_token)
+# Inputs
+halo_api_url = os.getenv("HALO_API_URL")
+halo_api_client_endpoint = ini_parameters["HALO_CLIENT_ENDPOINT"]
+halo_api_client_parameters = {"includeinactive": False}
+# halo_client_token (from HaloAuthorizer)
 
+halo_client_session = halo_requests.HaloSession(halo_client_token)
 halo_client_api = halo_requests.HaloInterface(
-    url=os.getenv("HALO_API_URL"),
-    endpoint=ini_parameters["HALO_CLIENT_ENDPOINT"],
-    dryrun=DRYRUN,
+    url=halo_api_url,
+    endpoint=halo_api_client_endpoint,
     fatal_fail=True)             # Abort if a request fails, otherwise missing clients will be incorrectly determined
 
-halo_client_parameters = {"includeinactive": False}
-halo_client_pages = halo_client_api.get(
-    session=halo_client_session,
-    parameters=halo_client_parameters)
+log.HaloClientRequestBegin().record("INFO")
+halo_client_pages = list()
+try:
+    halo_client_pages = halo_client_api.get(
+        session=halo_client_session,
+        parameters=halo_api_client_parameters)
+except ConnectionError as connection_error:
+    log.HaloClientRequestFail(connection_error).record("ERROR")
+    exit(1)
+if not halo_client_pages:
+    log.HaloTokenRequestFail()
+    exit(1)
 
-# Parse client data field from response json
-client_data_field = "clients"
-halo_clients_raw = list()
-for page in halo_client_pages:
-    client_data = page.json()[client_data_field]
-    halo_clients_raw += client_data if isinstance(client_data, list) else [client_data]
-
-# Convert json to client object
-halo_clients = [client_classes.HaloClient(client) for client in halo_clients_raw]
+halo_clients = halo_requests.parse_clients(halo_client_pages)
 
 
 ########################################
@@ -171,38 +187,44 @@ halo_clients = [client_classes.HaloClient(client) for client in halo_clients_raw
 ########################################
 
 # Set toplevel id for N-sight clients if toplevel name is provided in .ini, and it exists in Halo
-nsight_clients_toplevel = str(ini_parameters.get("NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
-if nsight_clients_toplevel:        # Get Halo toplevels to get the id of the input toplevel
+
+# Get toplevel id for the N-sight clients toplevel name
+nsight_toplevel = str(ini_parameters.get("NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
+if nsight_toplevel:
     halo_toplevel_api = halo_requests.HaloInterface(
         url=os.getenv("HALO_API_URL"),
         endpoint=ini_parameters["HALO_TOPLEVEL_ENDPOINT"],
-        dryrun=DRYRUN,
         fatal_fail=True)
 
-    halo_toplevel_parameters = {"includeinactive": False}
-    halo_toplevel_pages = halo_toplevel_api.get(
-        session=halo_client_session,
-        parameters=halo_client_parameters)
+    halo_api_toplevel_parameters = {"includeinactive": False}
+    log.HaloToplevelRequestBegin().record("INFO")
+    halo_toplevel_pages = list()
+    try:
+        halo_toplevel_pages = halo_toplevel_api.get(
+            session=halo_client_session,
+            parameters=halo_api_toplevel_parameters)
+    except ConnectionError as connection_error:
+        log.HaloToplevelRequestFail(connection_error).record("ERROR")
+        exit(1)
+    if not halo_toplevel_pages:
+        log.HaloToplevelRequestFail().record("ERROR")
+        exit(1)
 
-    toplevel_data_field = "tree"
-    existing_toplevels_raw = list()
-    for page in halo_toplevel_pages:
-        toplevel_data = page.json()[toplevel_data_field]
-        existing_toplevels_raw += toplevel_data if isinstance(toplevel_data, list) else [toplevel_data]
-
-    existing_toplevels = [client_classes.HaloToplevel(toplevel) for toplevel in existing_toplevels_raw]
+    existing_toplevels = halo_requests.parse_toplevels(halo_toplevel_pages)
     nsight_toplevel_match = [toplevel for toplevel in existing_toplevels
-                             if toplevel.name == nsight_clients_toplevel]
+                             if toplevel.name == nsight_toplevel]
 
     if nsight_toplevel_match:
         nsight_toplevel_id = nsight_toplevel_match[0].toplevel_id
         for client in nsight_clients:
             client.toplevel_id = nsight_toplevel_id
-        # Add toplevel_id as a comparison variable for Client class
-        # so that when comparing Clients, only Clients with matching toplevel_id's are counted as equal
-        client_classes.Client.comparison_variables += ["toplevel_id"]
     else:
-        log.NoMatchingToplevel(nsight_clients_toplevel).record("WARNING")
+        log.NoMatchingToplevel(nsight_toplevel).record("ERROR")
+        exit(1)
+
+    # Add toplevel_id as a comparison variable for Client class
+    # so that when comparing Clients, only Clients with matching toplevel_id's are counted as equal
+    client_classes.Client.comparison_variables += ["toplevel_id"]
 
 
 #################################
@@ -214,45 +236,62 @@ if not missing_clients:
     log.NoMissingClients().record("INFO")
     exit(0)
 
+log.InsertNClients(n_clients=len(missing_clients)).record("INFO")
+
 
 ########################
 # Post missing clients #
 ########################
 
-log.InsertNClients(n_clients=len(missing_clients)).record("INFO")
-halo_client_api.update_retry_policy(fatal_fail=False)   # If posting one Client to Halo fails, still try to post others
+# Inputs
+halo_api_url = os.getenv("HALO_API_URL")
+halo_api_client_endpoint = ini_parameters["HALO_CLIENT_ENDPOINT"]
+# DRYRUN (boolean)
+# halo_client_token (from HaloAuthorizer)
 
+halo_client_session = halo_requests.HaloSession(halo_client_token)
+halo_client_api = halo_requests.HaloInterface(
+    url=halo_api_url,
+    endpoint=halo_api_client_endpoint,
+    dryrun=DRYRUN,
+    fatal_fail=False)             # Continue if posting a client fails
+
+client_post_success = list()
 for client in missing_clients:
     log.ClientInsertBegin(client=client.name).record("INFO")
-    backup_id = general.generate_random_hex(8)
 
-    try:                                        # Only post if backup is successful
-        log.ClientInsertBackup(client=client.name, backup_id=backup_id).record("DEBUG")
-        client_post_data = [client.get_post_payload()]          # Halo post accepts dict wrapped in a list
-        sql_backup_table.insert(
+    client_post_data = [client.get_post_payload()]      # Halo accepts dict wrapped in a list
+    response = halo_client_api.post(
+        session=halo_client_session,
+        json=client_post_data)
+
+    client_post_success += [bool(response)]
+    if not response:
+        log.ClientInsertFail(client=client.name).record("WARNING")
+
+
+##############################
+# Backup post client actions #
+##############################
+
+for client, success in zip(missing_clients, client_post_success):
+    if not success:
+        continue
+
+    backup_id = general.generate_random_hex(8)
+    log.ClientInsertBackupBegin(client=client.name, backup_id=backup_id).record("INFO")
+
+    client_post_data = [client.get_post_payload()]
+    try:
+        n_rows_inserted = sql_backup_table.insert(
             session_id=SESSION_ID,
             backup_id=backup_id,
             action="insert",
             old="",
-            new=json.dumps(client_post_data),
-            post_successful=0)
-        log.ClientInsertBackupSuccess().record("DEBUG")
+            new=json.dumps(client_post_data))
+    except sqlite3.Error as sql_error:
+        log.ClientInsertBackupFail(client=client.name, error=sql_error).record("WARNING")
+    else:
+        if not n_rows_inserted:
+            log.ClientInsertBackupFail(client=client.name).record("WARNING")
 
-        response = halo_client_api.post(
-            session=halo_client_session,
-            json=client_post_data)
-
-        if response:
-            sql_backup_table.update(
-                column="post_successful",
-                value=1,
-                where=f'backup_id == "{backup_id}"')
-        else:
-            log.ClientInsertFail(client=client.name).record("WARNING")
-            continue
-
-    except sqlite3.Error as sql_error:         # Catch cases where Client is not posted, because backup action failed
-        log.ClientInsertBackupFail(client=client.name, backup_id=backup_id, error=sql_error).record("WARNING")
-        continue
-
-    log.ClientInsertSuccess().record("INFO")

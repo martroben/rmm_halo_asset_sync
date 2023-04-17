@@ -241,11 +241,41 @@ class NsightClientsRequestBegin(LogString):
         super().__init__(short)
 
 
+class HaloClientRequestBegin(LogString):
+    """Info about requesting Halo clients."""
+    def __init__(self):
+        short = "Requesting Halo clients."
+        super().__init__(short)
+
+
+class HaloClientRequestFail(LogString):
+    """Halo clients request fail message."""
+    def __init__(self, connection_error: Exception = None):
+        short = "Failed to get Halo clients."
+        full = f"{short} Error: {connection_error}. Exiting." or ""
+        super().__init__(short, full)
+
+
+class HaloToplevelRequestBegin(LogString):
+    """Info about requesting Halo toplevels."""
+    def __init__(self):
+        short = "Requesting Halo toplevels."
+        super().__init__(short)
+
+
+class HaloToplevelRequestFail(LogString):
+    """Halo toplevels request fail message."""
+    def __init__(self, connection_error: Exception = None):
+        short = "Failed to get Halo toplevels."
+        full = f"{short} Error: {connection_error}. Exiting." or ""
+        super().__init__(short, full)
+
+
 class NoMatchingToplevel(LogString):
     """No matching toplevel found in Halo."""
     def __init__(self, toplevel_name: str):
-        short = "No matching toplevel in Halo."
-        full = f"{short} Toplevel: {toplevel_name}. Ignoring toplevels."
+        short = "Toplevel designated for N-sight clients does not exist in Halo."
+        full = f"{short} Toplevel: {toplevel_name}. Exiting."
         super().__init__(short, full)
 
 
@@ -256,7 +286,7 @@ class NoMissingClients(LogString):
         super().__init__(short)
 
 
-class ClientInsertBackup(LogString):
+class ClientInsertBackupBegin(LogString):
     """Info about backup action starting."""
     def __init__(self, client: str, backup_id: str):
         short = "Inserting client to SQL backup table."
@@ -264,19 +294,15 @@ class ClientInsertBackup(LogString):
         super().__init__(short, full)
 
 
-class ClientInsertBackupSuccess(LogString):
-    """Info about successful backup action."""
-    def __init__(self):
-        short = "Successfully inserted client to SQL backup table."
-        super().__init__(short)
-
-
 class ClientInsertBackupFail(LogString):
     """Client backup failed."""
-    def __init__(self, client: str, backup_id: str, error: sqlite3.Error):
-        short = "SQL error while adding new Client to Halo."
-        full = f"{short} Client: {client}. Backup id: {backup_id}. Error: {error}"
+    def __init__(self, client: str, error: sqlite3.Error = None):
+        short = "Failed to backup client insert action to SQL."
+        full = f"{short} Client: {client}. Error: {error}"
         super().__init__(short, full)
+
+
+
 
 
 class InsertNClients(LogString):
@@ -293,13 +319,6 @@ class ClientInsertBegin(LogString):
         short = "Adding new client to Halo."
         full = f"{short} Client: {client}."
         super().__init__(short, full)
-
-
-class ClientInsertSuccess(LogString):
-    """Info about client successfully added to Halo."""
-    def __init__(self):
-        short = "Successfully added client."
-        super().__init__(short)
 
 
 class ClientInsertFail(LogString):

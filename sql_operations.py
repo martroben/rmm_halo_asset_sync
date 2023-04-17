@@ -377,15 +377,13 @@ class SqlTableBackup(SqlInterface):
         "backup_id": "TEXT",
         "action": "TEXT",
         "old": "TEXT",
-        "new": "TEXT",
-        "post_successful": "INTEGER"}
+        "new": "TEXT"}
     allowed_backup_actions = ["insert", "update", "remove"]     # Other values can't be inserted
 
     def __init__(self, path: str):
         super().__init__(path, table=self.default_table, columns=self.default_columns)
 
-    def insert(self, session_id: str, backup_id: str, action: str, old: (str | None), new: str,
-               post_successful: (bool, int)) -> int:
+    def insert(self, session_id: str, backup_id: str, action: str, old: (str | None), new: str) -> int:
         """
         Function to enter row to SQL backup table with structured parameters.
         :param session_id: Session id, hexadecimal string
@@ -406,6 +404,5 @@ class SqlTableBackup(SqlInterface):
             backup_id=backup_id,
             action=action.lower(),
             old=old,
-            new=new,
-            post_successful=int(post_successful))
+            new=new)
         return n_rows_inserted
