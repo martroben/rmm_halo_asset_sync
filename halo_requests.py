@@ -190,20 +190,17 @@ class HaloInterface:
         return response
 
 
-def parse_clients(clients_response: list[requests.Response]) -> list[client_classes.HaloClient]:
+def parse_clients(clients_response: list[requests.Response]) -> list[dict]:
     """
     Parse Halo client objects from request response data.
     :param clients_response:
     :return:
     """
     client_data_field = "clients"
-    clients_raw = list()
+    clients = list()
     for page in clients_response:
         client_data = page.json()[client_data_field]
-        clients_raw += client_data if isinstance(client_data, list) else [client_data]
-
-    # Convert json to client object
-    clients = [client_classes.HaloClient(client) for client in clients_raw]
+        clients += client_data if isinstance(client_data, list) else [client_data]
     return clients
 
 

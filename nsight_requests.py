@@ -25,14 +25,18 @@ def get_clients(url: str, api_key: str) -> requests.Response:
     return response
 
 
-def parse_clients(clients_response: requests.Response) -> list[client_classes.NsightClient]:
+def parse_clients(clients_response: requests.Response) -> list[dict]:
     """
 
     :param clients_response:
     :return:
     """
-    if not clients_response:
-        return []
+    xml_parse_patterns = {
+        "nsight_id": "./clientid",
+        "name": "./name"}
+
     clients_raw = xml_ET.fromstring(clients_response.text).findall("./items/client")
-    clients = [client_classes.NsightClient(client) for client in clients_raw]
+    clients = list()
+    for client_xml in clients_raw:
+        clients += [{name: client_xml.find(pattern).text for name, pattern in xml_parse_patterns.items()}]
     return clients

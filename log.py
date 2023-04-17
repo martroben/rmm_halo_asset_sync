@@ -241,6 +241,14 @@ class NsightClientsRequestBegin(LogString):
         super().__init__(short)
 
 
+class NsightClientsRequestFail(LogString):
+    """N-sight api client request failed."""
+    def __init__(self, code: int, reason: str):
+        short = "Failed to get N-sight clients."
+        full = f"{short} Code: {code} ({reason})."
+        super().__init__(short, full)
+
+
 class HaloClientRequestBegin(LogString):
     """Info about requesting Halo clients."""
     def __init__(self):
@@ -252,7 +260,7 @@ class HaloClientRequestFail(LogString):
     """Halo clients request fail message."""
     def __init__(self, connection_error: Exception = None):
         short = "Failed to get Halo clients."
-        full = f"{short} Error: {connection_error}. Exiting." or ""
+        full = f"{short} Error: {connection_error}. Exiting."
         super().__init__(short, full)
 
 
@@ -286,25 +294,6 @@ class NoMissingClients(LogString):
         super().__init__(short)
 
 
-class ClientInsertBackupBegin(LogString):
-    """Info about backup action starting."""
-    def __init__(self, client: str, backup_id: str):
-        short = "Inserting client to SQL backup table."
-        full = f"{short} Client: {client}. Backup id: {backup_id}."
-        super().__init__(short, full)
-
-
-class ClientInsertBackupFail(LogString):
-    """Client backup failed."""
-    def __init__(self, client: str, error: sqlite3.Error = None):
-        short = "Failed to backup client insert action to SQL."
-        full = f"{short} Client: {client}. Error: {error}"
-        super().__init__(short, full)
-
-
-
-
-
 class InsertNClients(LogString):
     """Info about n un-synced clients found from N-sight."""
     def __init__(self, n_clients: int):
@@ -326,6 +315,30 @@ class ClientInsertFail(LogString):
     def __init__(self, client: str):
         short = "Failed to add new client to Halo."
         full = f"{short} Client: {client}."
+        super().__init__(short, full)
+
+
+class ClientInsertResult(LogString):
+    """Client sync result."""
+    def __init__(self, n_success: int, n_fail: int):
+        short = "Finished inserting clients to Halo."
+        full = f"{short} Successfully inserted: {n_success}. Failed to insert: {n_fail}."
+        super().__init__(short, full)
+
+
+class ClientInsertBackupBegin(LogString):
+    """Info about backup action starting."""
+    def __init__(self, client: str, backup_id: str):
+        short = "Inserting client to SQL backup table."
+        full = f"{short} Client: {client}. Backup id: {backup_id}."
+        super().__init__(short, full)
+
+
+class ClientInsertBackupFail(LogString):
+    """Client backup failed."""
+    def __init__(self, client: str, error: sqlite3.Error = None):
+        short = "Failed to backup client insert action to SQL."
+        full = f"{short} Client: {client}. Error: {error}"
         super().__init__(short, full)
 
 
@@ -355,7 +368,7 @@ class RetryAttempt(LogString):
 class RetryFailed(LogString):
     """Failed retry log entry."""
     def __init__(self, function, exception: Exception, n_retries: int):
-        short = f"Retrying function '{function.__name__}' failed after {n_retries} attempts, " \
+        short = f"Retrying function '{function.__module__}.{function.__name__}' failed after {n_retries} attempts, " \
                  f"because {type(exception).__name__} occurred."
         super().__init__(short=short, exception=exception)
 

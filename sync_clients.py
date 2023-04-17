@@ -46,7 +46,7 @@ if missing_env_variables:
 # Global variables
 DRYRUN = bool(int(os.getenv("DRYRUN", 1)))
 SESSION_ID = general.generate_random_hex(8)
-REDACT_FILTER: log.Redactor
+REDACT_FILTER: log.Redactor()
 
 
 #################
@@ -146,8 +146,13 @@ log.NsightClientsRequestBegin().record("INFO")
 nsight_clients_response = nsight_requests.get_clients(          # Uses non-fatal retry
     url=nsight_base_url,
     api_key=nsight_api_key)
-# Assign empty list if request failed
-nsight_clients = nsight_requests.parse_clients(nsight_clients_response) if nsight_clients_response else []
+
+if nsight_clients_response:
+    nsight_client_data = nsight_requests.parse_clients(nsight_clients_response)
+    nsight_clients = [client_classes.NsightClient(client_data) for client_data in nsight_client_data]
+else:
+    log.NsightClientsRequestFail(nsight_clients_response.status_code, nsight_clients_response.reason).record("WARNING")
+    nsight_clients = list()
 
 
 ####################
@@ -176,10 +181,11 @@ except ConnectionError as connection_error:
     log.HaloClientRequestFail(connection_error).record("ERROR")
     exit(1)
 if not halo_client_pages:
-    log.HaloTokenRequestFail()
+    log.HaloClientRequestFail().record("ERROR")
     exit(1)
 
-halo_clients = halo_requests.parse_clients(halo_client_pages)
+halo_client_data = halo_requests.parse_clients(halo_client_pages)
+halo_clients = [client_classes.HaloClient(client_data) for client_data in halo_client_data]
 
 
 ########################################
@@ -269,6 +275,8 @@ for client in missing_clients:
     if not response:
         log.ClientInsertFail(client=client.name).record("WARNING")
 
+log.ClientInsertResult(sum(client_post_success), len(client_post_success) - sum(client_post_success)).record("INFO")
+
 
 ##############################
 # Backup post client actions #
@@ -294,4 +302,3 @@ for client, success in zip(missing_clients, client_post_success):
     else:
         if not n_rows_inserted:
             log.ClientInsertBackupFail(client=client.name).record("WARNING")
-

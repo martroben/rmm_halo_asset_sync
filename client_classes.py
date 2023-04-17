@@ -1,4 +1,3 @@
-
 class Client:
     """
     Root class for Client objects.
@@ -21,9 +20,9 @@ class NsightClient(Client):
     toplevel_id = ""
     halo_colour = "#a75ded"         # N-able purple to quickly distinguish Clients synced from N-sight
 
-    def __init__(self, client_xml):
-        self.nsight_id = client_xml.find("./clientid").text
-        self.name = client_xml.find("./name").text
+    def __init__(self, client: dict):
+        self.nsight_id = client["nsight_id"]
+        self.name = client["name"]
 
     def __repr__(self):
         return f"{self.name} (N-sight id: {self.nsight_id})"
@@ -41,7 +40,7 @@ class HaloClient(Client):
     Class for Halo client objects.
     Initiates from Halo API Client json.
     """
-    def __init__(self, client):
+    def __init__(self, client: dict):
         self.halo_id = client["id"]
         self.name = client["name"]
         self.toplevel_id = client["toplevel_id"]
