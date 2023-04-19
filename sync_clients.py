@@ -100,9 +100,9 @@ sql_sessions_table.insert(
     status="started")
 
 
-##################
-# Get Halo token #
-##################
+#########################
+# Get Halo client token #
+#########################
 
 # Inputs
 halo_api_authentication_url = os.getenv("HALO_API_AUTHENTICATION_URL")
@@ -192,22 +192,28 @@ halo_clients = [client_classes.HaloClient(client_data) for client_data in halo_c
 # Handle N-sight toplevel, if supplied #
 ########################################
 
+# Inputs
+halo_api_url = os.getenv("HALO_API_URL")
+halo_api_toplevel_endpoint = ini_parameters["HALO_TOPLEVEL_ENDPOINT"]
+halo_api_toplevel_parameters = {"includeinactive": False}
+# halo_client_token (from HaloAuthorizer)
+
 # Set toplevel id for N-sight clients if toplevel name is provided in .ini, and it exists in Halo
 
 # Get toplevel id for the N-sight clients toplevel name
 nsight_toplevel = str(ini_parameters.get("NSIGHT_CLIENTS_TOPLEVEL", "")).strip()
 if nsight_toplevel:
+    halo_toplevel_session = halo_requests.HaloSession(halo_client_token)
     halo_toplevel_api = halo_requests.HaloInterface(
-        url=os.getenv("HALO_API_URL"),
-        endpoint=ini_parameters["HALO_TOPLEVEL_ENDPOINT"],
+        url=halo_api_url,
+        endpoint=halo_api_toplevel_endpoint,
         fatal_fail=True)
 
-    halo_api_toplevel_parameters = {"includeinactive": False}
     log.HaloToplevelRequestBegin().record("INFO")
     halo_toplevel_pages = list()
     try:
         halo_toplevel_pages = halo_toplevel_api.get(
-            session=halo_client_session,
+            session=halo_toplevel_session,
             parameters=halo_api_toplevel_parameters)
     except ConnectionError as connection_error:
         log.HaloToplevelRequestFail(connection_error).record("ERROR")
@@ -237,12 +243,12 @@ if nsight_toplevel:
 # Get clients missing from Halo #
 #################################
 
-missing_clients = [client for client in nsight_clients if client not in halo_clients]
-if not missing_clients:
+clients_not_synced = [client for client in nsight_clients if client not in halo_clients]
+if not clients_not_synced:
     log.NoMissingClients().record("INFO")
     exit(0)
 
-log.InsertNClients(n_clients=len(missing_clients)).record("INFO")
+log.InsertNClients(n_clients=len(clients_not_synced)).record("INFO")
 
 
 ########################
@@ -263,7 +269,7 @@ halo_client_api = halo_requests.HaloInterface(
     fatal_fail=False)             # Continue if posting a client fails
 
 client_post_success = list()
-for client in missing_clients:
+for client in clients_not_synced:
     log.ClientInsertBegin(client=client.name).record("INFO")
 
     client_post_data = [client.get_post_payload()]      # Halo accepts dict wrapped in a list
@@ -282,18 +288,17 @@ log.ClientInsertResult(sum(client_post_success), len(client_post_success) - sum(
 # Backup post client actions #
 ##############################
 
-for client, success in zip(missing_clients, client_post_success):
-    if not success:
-        continue
+clients_to_backup = [client for client, success in zip(clients_not_synced, client_post_success) if success]
 
-    backup_id = general.generate_random_hex(8)
-    log.ClientInsertBackupBegin(client=client.name, backup_id=backup_id).record("INFO")
+for client in clients_to_backup:
+    client_backup_id = general.generate_random_hex(8)
+    log.ClientInsertBackupBegin(client=client.name, backup_id=client_backup_id).record("INFO")
 
     client_post_data = [client.get_post_payload()]
     try:
         n_rows_inserted = sql_backup_table.insert(
             session_id=SESSION_ID,
-            backup_id=backup_id,
+            backup_id=client_backup_id,
             action="insert",
             old="",
             new=json.dumps(client_post_data))
