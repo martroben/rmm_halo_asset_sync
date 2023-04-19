@@ -70,13 +70,15 @@ log.set_formatter(formatter, all_active_loggers)
 # Set level
 log.set_level(logging.getLevelName(ini_parameters["LOG_LEVEL"].upper()), all_active_loggers)
 
-# Set redact filter
+# Set log redact filter
 redact_patterns = [
     re.compile(os.getenv("NSIGHT_API_KEY"), flags=re.IGNORECASE),
     re.compile(os.getenv("HALO_API_TENANT"), flags=re.IGNORECASE),
     re.compile(os.getenv("HALO_API_CLIENT_ID"), flags=re.IGNORECASE),
     re.compile(os.getenv("HALO_API_CLIENT_SECRET"), flags=re.IGNORECASE)]
+
 REDACT_FILTER = log.Redactor(patterns=redact_patterns)      # Used globally to add additional redacted patterns
+
 if bool(int(os.getenv("REDACT_LOGS", 1))):
     log.set_filter(REDACT_FILTER, all_active_loggers)
 
@@ -192,13 +194,13 @@ halo_clients = [client_classes.HaloClient(client_data) for client_data in halo_c
 # Handle N-sight toplevel, if supplied #
 ########################################
 
+# Set toplevel id for N-sight clients if toplevel name is provided in .ini, and it exists in Halo
+
 # Inputs
 halo_api_url = os.getenv("HALO_API_URL")
 halo_api_toplevel_endpoint = ini_parameters["HALO_TOPLEVEL_ENDPOINT"]
 halo_api_toplevel_parameters = {"includeinactive": False}
 # halo_client_token (from HaloAuthorizer)
-
-# Set toplevel id for N-sight clients if toplevel name is provided in .ini, and it exists in Halo
 
 # Get toplevel id for the N-sight clients toplevel name
 nsight_toplevel = str(ini_parameters.get("NSIGHT_CLIENTS_TOPLEVEL", "")).strip()

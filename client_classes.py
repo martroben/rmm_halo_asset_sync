@@ -54,7 +54,7 @@ class HaloToplevel(Client):
     Class for Halo toplevel objects. (One level above Clients.)
     Initiates from Halo API Toplevel json.
     """
-    def __init__(self, toplevel):
+    def __init__(self, toplevel: dict):
         self.toplevel_id = toplevel["id"]
         self.name = toplevel["name"]
 

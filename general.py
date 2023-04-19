@@ -2,7 +2,6 @@
 # standard
 import functools
 import json
-import logging
 import os
 import random
 import re
@@ -65,14 +64,15 @@ def retry_function(function=None, *, n_retries: int = 3, interval_sec: float = 3
     return retry
 
 
-def parse_input_file_line(line: str, parse_value: bool = True) -> ((str, (str, dict)), None):
+def parse_input_file_line(line: str, parse_value: bool = True) -> (str, (dict | list | str)):
     """
     Parse line from input file.
     Returns None, if it's a comment line (starting with #).
     Tries to parse value: dict if value is json, list if it's values separated by commas, string otherwise.
-    :param line: Line from readlines.
-    :param parse_value: True/False whether values should be automatically parsed.
-    :return: None if comment line, dict if json, list if comma separated values or string.
+    :param line: Line from readlines
+    :param parse_value: True/False whether values should be automatically parsed
+    :return: None if comment line,
+    else variable name + dict if json, list if comma separated values, string if single value.
     """
     if re.search(r"^\s*#", line) or not re.search(r"=", line):
         return
@@ -83,8 +83,8 @@ def parse_input_file_line(line: str, parse_value: bool = True) -> ((str, (str, d
         try:
             value = json.loads(value)
         except json.decoder.JSONDecodeError:
-            value = [list_item.strip() for list_item in value.split(",") if len(value.split(","))]
-            value = value[0] if len(value) == 1 else value
+            value = [list_item.strip() for list_item in value.split(",")]
+            value = value[0] if len(value) == 1 else value      # return str if only a single value, else list
     return name, value
 
 
@@ -106,8 +106,8 @@ def parse_input_file(path: str, parse_values: bool = True,
                 parsed_values[parsed_line[0]] = parsed_line[1]
     if set_environmental_variables:
         # Make sure values are strings (env variables only accept strings)
-        values_for_environment = {key: str(value) for key, value in parsed_values.items()}
-        os.environ.update(**values_for_environment)
+        env_variables = {key: str(value) for key, value in parsed_values.items()}
+        os.environ.update(**env_variables)
     return parsed_values
 
 
