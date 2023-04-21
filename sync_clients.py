@@ -120,9 +120,9 @@ halo_authorizer = halo_requests.HaloAuthorizer(         # Uses fatal fail in ret
     client_id=halo_api_client_id,
     secret=halo_api_client_secret)
 
-halo_client_token = dict()
+halo_client_token = str()
 try:
-    halo_client_token = halo_authorizer.get_token(scope=halo_api_token_scope)
+    halo_client_token = halo_authorizer.get_token(scope=halo_api_token_scope)["access_token"]
 except ConnectionError as connection_error:
     log.HaloTokenRequestFail(connection_error).record("ERROR")
     exit(1)
@@ -132,7 +132,7 @@ if not halo_client_token:
     exit(1)
 
 # Add Halo token to log redact patterns
-halo_client_token_pattern = re.compile(rf"{halo_client_token['access_token']}")
+halo_client_token_pattern = re.compile(rf"{halo_client_token}")
 REDACT_FILTER.add_pattern(halo_client_token_pattern)
 
 
