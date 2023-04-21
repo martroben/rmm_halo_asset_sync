@@ -8,6 +8,11 @@ import responses as mock_responses
 import halo_requests
 
 
+
+########################
+# HaloAuthorizer tests #
+########################
+
 def test_halo_authorizer():
     mock_responses.start()
     mock_responses.add(
@@ -53,3 +58,34 @@ def test_halo_authorizer_fail():
 
     with pytest.raises(ConnectionError):
         halo_client_token = halo_authorizer.get_token(scope="edit:customers")
+
+
+#######################
+# HaloInterface tests #
+#######################
+
+api_interface = halo_requests.HaloInterface(
+    url="https://mockurl.com",
+    endpoint="mock_endpoint")
+
+api_session = halo_requests.HaloSession(token="MOCKTOKENSTRING12345")
+
+
+def test_api_get():
+    mock_responses.start()
+    mock_responses.add(
+        method=mock_responses.GET,
+        url=re.compile(r".*"),
+        json={"record_count": "10"},
+        status=200)
+    mock_responses.add(
+        method=mock_responses.GET,
+        url=re.compile(r".*"),
+        json={"record_count": "0"},
+        status=200)
+
+    ########################## Continue here: paginated response
+    paginated_responses = api_interface.get(
+        session=api_session,
+        parameters={"parameter1": 1, "parameter2": 2})
+
