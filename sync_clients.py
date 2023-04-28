@@ -224,7 +224,8 @@ if nsight_toplevel:
         log.HaloToplevelRequestFail().record("ERROR")
         exit(1)
 
-    existing_toplevels = halo_requests.parse_toplevels(halo_toplevel_pages)
+    existing_toplevel_data = halo_requests.parse_toplevels(halo_toplevel_pages)
+    existing_toplevels = [client_classes.HaloToplevel(toplevel_data) for toplevel_data in existing_toplevel_data]
     nsight_toplevel_match = [toplevel for toplevel in existing_toplevels
                              if toplevel.name == nsight_toplevel]
 

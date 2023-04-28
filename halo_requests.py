@@ -1,4 +1,4 @@
-
+import json
 # standard
 import re
 # external
@@ -74,7 +74,7 @@ class HaloInterface:
         self.dryrun = dryrun
         if dryrun:      # Replace post with mock function
             self.post = self.mock_post
-        # Initialize request with retry decorator
+        # Initialize request with @retry_function decorator
         self._request = general.retry_function(self._request, fatal_fail=fatal_fail)
 
     def update_retry_policy(self, **kwargs):
@@ -132,7 +132,9 @@ class HaloInterface:
                 session=session,
                 method="GET",
                 params=parameters)
-            if not response or not int(self.record_count_pattern.findall(response.text)[0]):
+            if not response:
+                break
+            if not int(self.record_count_pattern.findall(response.text)[0]):
                 break
             parameters["page_no"] += 1
             responses += [response]
@@ -158,7 +160,7 @@ class HaloInterface:
         """
         response_json = {
             "response": "mock post response",
-            "args": ", ".join(args)}
+            "args": json.dumps(args)}
         response_json.update(kwargs)
 
         mock_responses.start()
@@ -169,6 +171,7 @@ class HaloInterface:
             status=201)
 
         response = requests.post(self.endpoint_url)
+        mock_responses.stop()
         return response
 
 
@@ -186,17 +189,16 @@ def parse_clients(clients_response: list[requests.Response]) -> list[dict]:
     return clients
 
 
-def parse_toplevels(toplevels_response: list[requests.Response]) -> list[client_classes.HaloToplevel]:
+def parse_toplevels(toplevels_response: list[requests.Response]) -> list[dict]:
     """
 
     :param toplevels_response:
     :return:
     """
     toplevels_data_field = "tree"
-    toplevels_raw = list()
+    toplevels = list()
     for page in toplevels_response:
         toplevel_data = page.json()[toplevels_data_field]
-        toplevels_raw += toplevel_data if isinstance(toplevel_data, list) else [toplevel_data]
+        toplevels += toplevel_data if isinstance(toplevel_data, list) else [toplevel_data]
 
-    toplevels = [client_classes.HaloToplevel(toplevel) for toplevel in toplevels_raw]
     return toplevels
