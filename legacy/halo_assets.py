@@ -15,7 +15,7 @@ from authenticate import get_halo_token
 # Set up environmental variables #
 ##################################
 
-env_file_path = ".env"
+env_file_path = "../.env"
 # dotenv_values just reads from file without assigning variables to environment.
 # use load_dotenv for the "real thing"
 env_variables = dotenv_values(env_file_path)

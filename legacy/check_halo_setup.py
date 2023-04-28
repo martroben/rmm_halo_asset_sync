@@ -59,8 +59,8 @@ del log_string
 # Import environmental / config variables #
 ###########################################
 
-env_file_path = ".env"
-ini_file_path = ".ini"
+env_file_path = "../.env"
+ini_file_path = "../.ini"
 
 general.parse_input_file(
     env_file_path,

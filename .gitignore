@@ -1,10 +1,11 @@
+.ini
 .env
-halo_rmm_fields.txt
-sample_halo_fields.txt
-sample_rmm_fields.txt
-sample_halo_client.txt
+sample_data/halo_rmm_fields.txt
+sample_data/sample_halo_fields.txt
+sample_data/sample_rmm_fields.txt
+sample_data/sample_halo_client.txt
 backup
-random_unfinished.py
+legacy/random_unfinished.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
