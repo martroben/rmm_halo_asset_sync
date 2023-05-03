@@ -10,6 +10,7 @@ import logstring
 def set_logs_to_stdout(loggers: list[logging.Logger]) -> None:
     """
     Remove all alternative handlers and make sure only root logger has a handler.
+    Set root logger handler to output to stdout.
     :return:
     """
     handler = logging.StreamHandler(sys.stdout)  # Direct logs to stdout
@@ -20,7 +21,8 @@ def set_logs_to_stdout(loggers: list[logging.Logger]) -> None:
 
 def set_formatter(formatter: logging.Formatter, loggers: list[logging.Logger]) -> None:
     """
-    Set formatter to all loggers
+    Set formatter to all handlers associated with input loggers.
+    Warning: same handler can also be associated with other loggers that are not in the input.
     :param formatter:
     :param loggers:
     :return:
@@ -32,7 +34,9 @@ def set_formatter(formatter: logging.Formatter, loggers: list[logging.Logger]) -
 
 def set_level(level: int, loggers: list[logging.Logger]) -> None:
     """
-    Set log level globally.
+    Set log level for all input loggers and also to root logger.
+    If level is DEBUG, also direct http request debug messages to logger specified in env.
+    (Usually hattp debug is just printed.)
     :param loggers:
     :param level:
     :return:
