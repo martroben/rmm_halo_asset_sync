@@ -1,5 +1,6 @@
 # standard
 import logging
+import re
 import requests
 import sys
 # local
@@ -140,3 +141,111 @@ def test_set_filter(capsys):
     assert "regular_message2" in captured.out
     assert "filtered_message3" in captured.out
     assert "regular_message3" in captured.out
+
+
+def test_redactor_string_number(capsys):
+    redacted_logger = logging.getLogger("redacted_logger")
+    log_operations.set_logs_to_stdout([redacted_logger])
+    redactor = log_operations.Redactor([
+        re.compile(r"redact_string"),
+        re.compile("111")])
+    log_operations.set_filter(redactor, [redacted_logger])
+
+    redacted_logger.error("test redacted string redact_string")
+    redacted_logger.error(111)
+    redacted_logger.error(333222111)
+    captured = capsys.readouterr()
+
+    assert f"test redacted string {log_operations.Redactor.redact_replacement_string}" in captured.out
+    assert f"{log_operations.Redactor.redact_replacement_number}" in captured.out
+    assert f"333222111" in captured.out
+
+
+def test_redactor_tuple(capsys):
+    redacted_logger = logging.getLogger("redacted_logger")
+    log_operations.set_logs_to_stdout([redacted_logger])
+    redactor = log_operations.Redactor([
+        re.compile(r"redact_string"),
+        re.compile("111")])
+    log_operations.set_filter(redactor, [redacted_logger])
+
+    redacted_logger.error(("test redact_string", 111, 333222111))
+    captured = capsys.readouterr()
+
+    assert f"test {log_operations.Redactor.redact_replacement_string}" in captured.out
+    assert f"{log_operations.Redactor.redact_replacement_number}" in captured.out
+    assert f"333222111" in captured.out
+
+
+def test_redactor_list(capsys):
+    redacted_logger = logging.getLogger("redacted_logger")
+    log_operations.set_logs_to_stdout([redacted_logger])
+    redactor = log_operations.Redactor([
+        re.compile(r"redact_string"),
+        re.compile("111")])
+    log_operations.set_filter(redactor, [redacted_logger])
+
+    redacted_logger.error(["test redact_string", 111, 333222111])
+    captured = capsys.readouterr()
+
+    assert f"test {log_operations.Redactor.redact_replacement_string}" in captured.out
+    assert f"{log_operations.Redactor.redact_replacement_number}" in captured.out
+    assert f"333222111" in captured.out
+
+
+def test_redactor_dict(capsys):
+    redacted_logger = logging.getLogger("redacted_logger")
+    log_operations.set_logs_to_stdout([redacted_logger])
+    redactor = log_operations.Redactor([
+        re.compile(r"redact_string"),
+        re.compile("111")])
+    log_operations.set_filter(redactor, [redacted_logger])
+
+    redacted_logger.error({"string": "test redact_string", "match_number": 111, "not_match_number": 333222111})
+    captured = capsys.readouterr()
+
+    assert f"test {log_operations.Redactor.redact_replacement_string}" in captured.out
+    assert f"{log_operations.Redactor.redact_replacement_number}" in captured.out
+    assert f"333222111" in captured.out
+
+
+def test_redactor_bad_object(capsys):
+    redacted_logger = logging.getLogger("redacted_logger")
+    log_operations.set_logs_to_stdout([redacted_logger])
+    redactor = log_operations.Redactor([
+        re.compile(r"redact_string"),
+        re.compile("111")])
+    log_operations.set_filter(redactor, [redacted_logger])
+
+    redacted_logger.error(re.compile(r"bad object"))
+    captured = capsys.readouterr()
+
+    assert "Value error" in captured.out
+
+
+def test_standard_formatter(capsys):
+    std_formatter = log_operations.StandardFormatter(indicator="test_indicator", session_id="test_id")
+    test_handler = logging.StreamHandler(sys.stdout)
+    test_handler.setFormatter(std_formatter)
+    test_logger = logging.getLogger("test_logger")
+    test_logger.addHandler(test_handler)
+
+    test_logger.error("test_error")
+    captured = capsys.readouterr()
+
+    assert "test_indicator" in captured.out
+    assert "test_id" in captured.out
+    assert log_operations.StandardFormatter.dryrun_indicator not in captured.out
+
+
+def test_standard_formatter_dryrun(capsys):
+    std_formatter = log_operations.StandardFormatter(indicator="test_indicator", session_id="test_id", dryrun=True)
+    test_handler = logging.StreamHandler(sys.stdout)
+    test_handler.setFormatter(std_formatter)
+    test_logger = logging.getLogger("test_logger")
+    test_logger.addHandler(test_handler)
+
+    test_logger.error("test_error")
+    captured = capsys.readouterr()
+
+    assert log_operations.StandardFormatter.dryrun_indicator in captured.out

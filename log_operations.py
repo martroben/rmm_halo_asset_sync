@@ -124,8 +124,8 @@ class Redactor(logging.Filter):
             log_object_type = type(log_object)
             redacted_object = self.redact_string(str(log_object))
             return log_object_type(redacted_object)
-        except ValueError as value_error:
-            logstring.RedactFail(input_object=log_object, exception=value_error).record("WARNING")
+        except (ValueError, TypeError) as error:
+            logstring.RedactFail(input_object=log_object, exception=error).record("WARNING")
             return log_object
 
 
