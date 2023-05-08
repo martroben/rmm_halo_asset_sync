@@ -65,7 +65,7 @@ formatter = log.StandardFormatter(
     indicator=ini_parameters["LOG_STRING_INDICATOR"],
     session_id=SESSION_ID,
     dryrun=DRYRUN)
-log.set_formatter(formatter, all_active_loggers)
+log_operations.set_formatter(formatter, all_active_loggers)
 
 # Set level
 log.set_level(logging.getLevelName(ini_parameters["LOG_LEVEL"].upper()), all_active_loggers)
