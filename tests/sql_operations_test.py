@@ -191,7 +191,7 @@ def test_read_data_where_error():
         table_interface.insert(**row)
 
     with pytest.raises(ValueError):
-        where_result = table_interface.select(where="integer_column =")
+        table_interface.select(where="integer_column =")
 
 
 def test_sessions_table():
@@ -211,13 +211,12 @@ def test_backup_table_insert():
         backup_id="CDE456",
         action="insert",
         old=None,
-        new="{'new_value': 11111}",
-        post_successful=False)
+        new="{'new_value': 11111}")
 
     cursor = backup_table.connection.cursor()
     cursor.execute(f"SELECT * FROM {backup_table.table}")
     data = cursor.fetchall()
-    assert data == [('ABC123', 'CDE456', 'insert', None, "{'new_value': 11111}", 0)]
+    assert data == [('ABC123', 'CDE456', 'insert', None, "{'new_value': 11111}")]
 
     # Check inserting forbidden action
     with pytest.raises(sqlite3.Error):
@@ -226,8 +225,7 @@ def test_backup_table_insert():
             backup_id="a",
             action="forbidden_action",
             old=None,
-            new="a",
-            post_successful=False)
+            new="a")
 
 
 def test_backup_table_update():
@@ -237,12 +235,11 @@ def test_backup_table_update():
         backup_id="CDE456",
         action="update",
         old=None,
-        new="{'new_value': 11111}",
-        post_successful=False)
+        new="{'new_value': 11111}")
 
-    backup_table.update(post_successful=True)
+    backup_table.update(backup_id="updated_id")
 
     cursor = backup_table.connection.cursor()
     cursor.execute(f"SELECT * FROM {backup_table.table}")
     data = cursor.fetchall()
-    assert data == [('ABC123', 'CDE456', 'update', None, "{'new_value': 11111}", 1)]
+    assert data == [('ABC123', 'updated_id', 'update', None, "{'new_value': 11111}")]
