@@ -9,7 +9,8 @@ import sqlite3
 import client_classes
 import general
 import halo_requests
-import log
+import log_operations
+import logstring
 import nsight_requests
 from sql_operations import SqlTableBackup, SqlTableSessions
 
@@ -40,13 +41,13 @@ required_env_variables = [
 
 missing_env_variables = [variable for variable in required_env_variables if os.getenv(variable, None) is None]
 if missing_env_variables:
-    log.EnvVariablesMissing(missing_env_variables).record("ERROR")
+    logstring.EnvVariablesMissing(missing_env_variables).record("ERROR")
     exit(1)
 
 # Global variables
 DRYRUN = bool(int(os.getenv("DRYRUN", 1)))
 SESSION_ID = general.generate_random_hex(8)
-REDACT_FILTER: log.Redactor()
+REDACT_FILTER: log_operations.Redactor()
 
 
 #################
@@ -58,17 +59,17 @@ all_active_loggers = [logger for logger in logging.root.manager.loggerDict.value
                       if not isinstance(logger, logging.PlaceHolder)]
 
 # Send all logs to stdout
-log.set_logs_to_stdout(all_active_loggers)
+log_operations.set_logs_to_stdout(all_active_loggers)
 
 # Set formatter to all logs
-formatter = log.StandardFormatter(
+formatter = log_operations.StandardFormatter(
     indicator=ini_parameters["LOG_STRING_INDICATOR"],
     session_id=SESSION_ID,
     dryrun=DRYRUN)
 log_operations.set_formatter(formatter, all_active_loggers)
 
 # Set level
-log.set_level(logging.getLevelName(ini_parameters["LOG_LEVEL"].upper()), all_active_loggers)
+log_operations.set_level(logging.getLevelName(ini_parameters["LOG_LEVEL"].upper()), all_active_loggers)
 
 # Set log redact filter
 redact_patterns = [
@@ -77,10 +78,10 @@ redact_patterns = [
     re.compile(os.getenv("HALO_API_CLIENT_ID"), flags=re.IGNORECASE),
     re.compile(os.getenv("HALO_API_CLIENT_SECRET"), flags=re.IGNORECASE)]
 
-REDACT_FILTER = log.Redactor(patterns=redact_patterns)      # Used globally to add additional redacted patterns
+REDACT_FILTER = log_operations.Redactor(patterns=redact_patterns)      # Used globally to add additional redacted patterns
 
 if bool(int(os.getenv("REDACT_LOGS", 1))):
-    log.set_filter(REDACT_FILTER, all_active_loggers)
+    log_operations.set_filter(REDACT_FILTER, all_active_loggers)
 
 
 #############
@@ -90,12 +91,12 @@ if bool(int(os.getenv("REDACT_LOGS", 1))):
 # Use in-memory SQL for dry-run
 sql_database_path = ":memory:" if DRYRUN else ini_parameters["SQL_DATABASE_PATH"]
 
-log.SqlSetupBegin(sql_database_path).record("INFO")
+logstring.SqlSetupBegin(sql_database_path).record("INFO")
 sql_sessions_table = SqlTableSessions(sql_database_path)
 sql_backup_table = SqlTableBackup(sql_database_path)
 
 # Insert session info to SQL
-log.SqlInsertSessionInfo(SESSION_ID).record("INFO")
+logstring.SqlInsertSessionInfo(SESSION_ID).record("INFO")
 sql_sessions_table.insert(
     session_id=SESSION_ID,
     time_unix=int(datetime.now().timestamp()),
@@ -113,7 +114,7 @@ halo_api_client_id = os.getenv("HALO_API_CLIENT_ID")
 halo_api_client_secret = os.getenv("HALO_API_CLIENT_SECRET")
 halo_api_token_scope = "edit:customers"
 
-log.HaloTokenRequestBegin().record("INFO")
+logstring.HaloTokenRequestBegin().record("INFO")
 halo_authorizer = halo_requests.HaloAuthorizer(         # Uses fatal fail in retry
     url=halo_api_authentication_url,
     tenant=halo_api_tenant,
@@ -124,11 +125,11 @@ halo_client_token = str()
 try:
     halo_client_token = halo_authorizer.get_token(scope=halo_api_token_scope)["access_token"]
 except ConnectionError as connection_error:
-    log.HaloTokenRequestFail(connection_error).record("ERROR")
+    logstring.HaloTokenRequestFail(connection_error).record("ERROR")
     exit(1)
 
 if not halo_client_token:
-    log.HaloTokenRequestFail()
+    logstring.HaloTokenRequestFail()
     exit(1)
 
 # Add Halo token to log redact patterns
@@ -144,7 +145,7 @@ REDACT_FILTER.add_pattern(halo_client_token_pattern)
 nsight_base_url = os.getenv("NSIGHT_BASE_URL")
 nsight_api_key = os.getenv("NSIGHT_API_KEY")
 
-log.NsightClientsRequestBegin().record("INFO")
+logstring.NsightClientsRequestBegin().record("INFO")
 nsight_clients_response = nsight_requests.get_clients(          # Uses non-fatal retry
     url=nsight_base_url,
     api_key=nsight_api_key)
@@ -153,7 +154,7 @@ if nsight_clients_response:
     nsight_client_data = nsight_requests.parse_clients(nsight_clients_response)
     nsight_clients = [client_classes.NsightClient(client_data) for client_data in nsight_client_data]
 else:
-    log.NsightClientsRequestFail(nsight_clients_response.status_code, nsight_clients_response.reason).record("WARNING")
+    logstring.NsightClientsRequestFail(nsight_clients_response.status_code, nsight_clients_response.reason).record("WARNING")
     nsight_clients = list()
 
 

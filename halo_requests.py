@@ -5,9 +5,8 @@ import re
 import requests
 import responses as mock_responses
 # local
-import client_classes
 import general
-import log
+import logstring
 
 
 class HaloSession(requests.Session):
@@ -50,7 +49,7 @@ class HaloAuthorizer:
             params=parameters)
 
         if not response.ok:         # Raise error to trigger retry
-            log_entry = log.BadResponse(
+            log_entry = logstring.BadResponse(
                 method="POST",
                 url=self.url,
                 response=response,
@@ -105,7 +104,7 @@ class HaloInterface:
             json=json)
 
         if not response.ok:             # If request is unsuccessful, raise error to trigger a retry
-            log_entry = log.BadResponse(
+            log_entry = logstring.BadResponse(
                 method=method,
                 url=self.endpoint_url,
                 response=response,

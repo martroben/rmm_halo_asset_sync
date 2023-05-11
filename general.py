@@ -7,7 +7,7 @@ import random
 import re
 from time import sleep
 # local
-import log
+import logstring
 
 
 def retry_function(function=None, *, n_retries: int = 3, interval_sec: float = 3.0,
@@ -37,7 +37,7 @@ def retry_function(function=None, *, n_retries: int = 3, interval_sec: float = 3
                 response = function(*args, **kwargs)
             except exceptions as exception:
                 if attempt < n_retries:
-                    log_entry = log.RetryAttempt(
+                    log_entry = logstring.RetryAttempt(
                         function=function,
                         exception=exception,
                         n_retries=n_retries,
@@ -48,7 +48,7 @@ def retry_function(function=None, *, n_retries: int = 3, interval_sec: float = 3
                     attempt += 1
                     sleep(interval_sec)
                 else:
-                    log_entry = log.RetryFailed(
+                    log_entry = logstring.RetryFailed(
                         function=function,
                         exception=exception,
                         n_retries=n_retries)
@@ -59,7 +59,7 @@ def retry_function(function=None, *, n_retries: int = 3, interval_sec: float = 3
                         raise exception
             else:
                 if attempt > 1:
-                    log.LogString("Retry successful!", context=function.__name__).record("INFO")
+                    logstring.LogString("Retry successful!", context=function.__name__).record("INFO")
                 return response
     return retry
 

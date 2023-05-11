@@ -4,7 +4,6 @@ import requests
 # external
 import xml.etree.ElementTree as xml_ET      # xml parser
 # local
-import client_classes
 import general
 
 
